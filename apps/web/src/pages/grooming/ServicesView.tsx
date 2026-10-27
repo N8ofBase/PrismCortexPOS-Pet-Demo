@@ -86,8 +86,8 @@ export function ServicesView() {
         </table>
       </div>
       <p className="muted small">
-        Sizes: {SIZES.map((z) => `${z} ${SIZE_HINT[z]}`).join(" · ")}. Deposits and online booking come with
-        the public booking page.
+        Sizes: {SIZES.map((z) => `${z} ${SIZE_HINT[z]}`).join(" · ")}. A deposit is asked for on online
+        bookings as set under Settings → Online booking, and comes off the groom at the register.
       </p>
       {editing && (
         <ServiceForm service={editing === "new" ? null : editing} onClose={() => setEditing(null)} />

@@ -6,6 +6,9 @@ import {
   bookOnline,
   cancelMine,
   customerForToken,
+  depositStatus,
+  payDeposit,
+  simulateDepositPayment,
   myAccount,
   openTimesFor,
   requestCode,
@@ -28,6 +31,9 @@ export const publicHandlers = {
   bookOnline,
   cancelMine,
   rescheduleMine,
+  depositStatus,
+  payDeposit,
+  simulateDepositPayment,
 };
 
 export type PublicHandlers = typeof publicHandlers;

@@ -21,7 +21,13 @@ Status: **Phases 1, 2 (except 2d, real Square) and 3 are done** in demo mode.
 
 - Phase 4a: an online booking page at `/book` (sign-in with a one-time code, pick a pet, service, groomer and open time, see, cancel or reschedule up to a cutoff), online bookings tagged on the staff calendar, and Online booking settings.
 
-The demo is live at https://petpos-demo.prismcortex.net (booking page: https://petpos-demo.prismcortex.net/book). Next: Phase 4b (deposits) and 4c (confirmations, reminders and rebook nudges).
+- Phase 4b: deposits on online bookings, through a payment link (a simulated Square page in the demo).
+  - The time is held while the customer pays.
+  - The deposit comes off the groom at the register.
+  - It's refunded on an in-time cancel, and kept as a fee on a no-show as the store chooses.
+  - Staff can ask for a deposit on phone bookings.
+
+The demo is live at https://petpos-demo.prismcortex.net (booking page: https://petpos-demo.prismcortex.net/book). Next: Phase 4c (confirmations, reminders and rebook nudges).
 
 ## Run it
 

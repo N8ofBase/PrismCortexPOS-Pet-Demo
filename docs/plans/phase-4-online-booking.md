@@ -1,6 +1,6 @@
 # Phase 4 plan: online booking
 
-Status: **4a approved and built; live on the demo. 4b and 4c waiting.**
+Status: **4a and 4b built. 4c not planned yet.**
 
 Built differently from the plan in 4a:
 - A wrong sign-in code is returned as a result (`{status: "wrong"}`), not thrown, so the try count is saved; a thrown error would roll it back.
@@ -170,3 +170,173 @@ The sample store has online booking on. The sample services and both sample groo
 - **4b and 4c:** deposits (4b); confirmations, reminders and rebook nudges (4c).
 - **Customer-uploaded documents:** proof of vaccination uploads come with hosted mode (S3).
 - **Waitlists and repeat bookings:** not planned yet.
+
+---
+
+## Session 4b: deposits
+
+Status: **approved and built.**
+
+Built differently from the plan:
+- **Naming:** the deposit rule is `bookingDeposit()`, because `depositFor()` was already the drawer's bank deposit.
+- **Partial refunds:** `deposits` also keeps `refunded_cents`. That covers the part a discounted sale didn't need, and lets a voided sale put back exactly what's left.
+- **Staff cancel, box unticked:** the deposit is kept as a "Cancellation fee" sale, the same way a no-show fee is.
+- **Receipt numbers:** `nextReceiptNumber()` moved to `services/api/src/shared.ts`, since kept deposits use it too.
+- **Deposit texts:** `appointment_messages` allows kind `deposit` for the texted link.
+- **No-show default:** the store's setting reaches the counter as `me.business.keepDepositOnNoShow`.
+- **Test fix:** fixed a time-of-day flake in the 4a cutoff test, which moved a booking to "an hour from now" and could collide with today's demo grooms.
+
+When it's done:
+- A customer booking online pays a deposit when the store asks for one. The time is held for them while they pay.
+- The deposit comes off the groom at the register automatically.
+- Canceling in time refunds it. A no-show keeps it as a no-show fee, or refunds it, as the store chooses.
+- Staff can ask for a deposit on a phone booking too.
+
+In the demo, a **simulated Square payment page** stands in for Square, with **Pay** and **Cancel** buttons. It's like the simulated card reader: no card fields, and nothing is charged. Hosted mode swaps in Square Payment Links and Square's webhook. That comes with real Square (2d), behind the same interface.
+
+### When a deposit is asked for
+
+- **The amount:** the service's deposit, which can already be set on each service. Add-ons never carry a deposit. The deposit is never more than the groom's quote.
+- **The store's setting,** under Settings → Online booking:
+  - **Off**
+  - **Every online booking whose service has a deposit**
+  - **New customers only:** customers with no finished groom yet. This is the default; the spec says "for new customers or chosen services".
+- **Staff bookings** don't need a deposit. Staff can tap **Ask for a deposit** on the appointment (see Staff side).
+- The rule is `bookingDeposit({ rule, serviceDepositCents, quoteCents, isNewCustomer })` in `packages/core/src/booking.ts`, used by both the booking page and the server.
+
+### Holding the time while the customer pays
+
+- **On Book:**
+  - When a deposit is due, the appointment is saved as **Held** with a `hold_expires_at`. The default hold is 15 minutes, set in Settings.
+  - A held booking takes the slot, and the double-booking constraint counts it, so no one else can grab it while the customer pays.
+  - The customer goes to the payment page.
+- **Paid:**
+  - The appointment becomes **Booked** and the deposit is **Paid**.
+  - The customer sees "You're booked! $20.00 deposit paid. It comes off the $70.00 at pickup."
+- **Canceled payment or closed page:** the booking page shows "Your time is held until 10:15 AM" with **Pay deposit** and **Cancel booking**. My appointments shows the same.
+- **Hold runs out:** the appointment is canceled and the time opens up again.
+  - `releaseHolds(trx)` runs at the start of open times, booking, moving and loading the calendar, so a run-out hold never blocks anyone. Hosted mode adds a scheduled sweep.
+  - If a payment arrives after the hold ran out and the time was taken, the deposit is refunded automatically. The customer sees "Sorry, the hold ran out before your payment came in. Your $20.00 deposit was refunded."
+
+### At the register
+
+- **Applied automatically:** when a groom with a paid deposit goes on a ticket, checkout adds a completed payment "Deposit paid online" (method `deposit`) for the deposit, and the customer pays what's left by card, cash or split.
+  - The ticket shows "Deposit paid online −$20.00" and "Due $55.00".
+  - The receipt shows the deposit as a payment line.
+  - If discounts bring the groom below the deposit, only up to the total is applied. The rest is refunded to the customer's card, and the screen says so.
+- **Voiding the sale** puts the deposit back to Paid, so it applies next time. It isn't refunded.
+- **Refunding the sale later:** the deposit is part of the money that can be refunded. The refund goes back to the card it came from, through the payment link's refund, and is audited like any other refund.
+
+### Cancel, reschedule and no-show
+
+| What happens | The deposit |
+| --- | --- |
+| The customer cancels online (only allowed before the cutoff) | Refunded in full, automatically |
+| The customer reschedules, or staff move the groom | Stays with the appointment |
+| Staff cancel | The panel asks **Refund the $20.00 deposit?**, ticked by default |
+| The groomer called out (call-out tool cancels) | Refunded |
+| Customer deleted (upcoming grooms are canceled) | Refunded |
+| No-show | The panel asks **Keep the $20.00 deposit as a no-show fee?**, ticked when the store's setting is Keep (the default) |
+
+- **A kept deposit becomes a paid sale:** one untaxed line, "No-show fee: Biscuit, Thu Oct 22", paid by the deposit. That way it counts in sales and has a receipt number. If the owner changes their mind, they refund it like any sale.
+- **Undo no-show** on a groom whose fee sale was already made says to refund that sale first.
+- **Audit:** every deposit refund and keep writes to `audit_log`.
+
+### Staff side
+
+- **Appointment panel:**
+  - the deposit line: "Deposit $20.00 paid online Oct 21" / "Waiting for deposit, held until 10:15 AM" / "Deposit refunded" / "Kept as a no-show fee"
+  - **Ask for a deposit** on a booked groom with none. It makes a payment link and shows it to copy, with **Text it** (a preview in `appointment_messages`).
+  - **Refund deposit**, for managers and owners
+- **Calendar:** a paid deposit shows "$" on the block. A held booking is drawn dashed with "Waiting for deposit" and disappears when the hold runs out.
+- **Services:** the deposit field loses its "comes with Phase 4" note. The table shows deposits as now.
+- **Settings → Online booking:**
+  - **Deposits:** Off / Every online booking with a deposit / New customers only
+  - **Hold an unpaid booking for:** 10 / 15 / 30 minutes
+  - **On a no-show:** Keep the deposit / Refund it
+- **End of day and Sales:**
+  - New lines: "Online deposits taken", "Deposits used at the register" and "Kept as no-show fees". Counter card and cash stay as they are.
+  - Deposits are card money that arrives through Square, not the drawer. `moneyTotals()` reports them separately, so cash counts and counter card totals don't change.
+
+### Database: migration 018_deposits
+
+- **`deposits`:**
+  - id, business_id, appointment_id, customer_id, amount_cents
+  - status: `pending`, `paid`, `applied`, `refunded`, `kept`, `expired`, `canceled`
+  - provider (`square`), link_id, provider_ref (Square's payment id), refund_ref
+  - paid_at, applied_sale_id, kept_sale_id, refunded_at, is_demo, timestamps
+  - row-level security, `(business_id, id)` foreign keys, and a unique index so an appointment has at most one live deposit
+- **`appointments`:**
+  - status adds `held`
+  - adds `hold_expires_at`
+  - `deposit_payment_id` is renamed to `deposit_id`, with a foreign key to `deposits`
+- **`payments`:**
+  - method adds `deposit`
+  - adds `deposit_id`
+- **`refund_payments`:** method adds `deposit`.
+- **`businesses`:**
+  - `deposit_rule`: `off`, `all` or `new`; default `new`
+  - `deposit_hold_minutes`: default 15
+  - `deposit_no_show`: `keep` or `refund`; default `keep`
+- **Demo:**
+  - the demo store uses `all`, so the Sample Full groom's $20.00 deposit shows for the sample customer
+  - one upcoming demo groom with a paid deposit, added through `once(...)`, so the register shows it applied
+
+### Payment links: `DepositCheckout`
+
+`services/api/src/payments/checkout.ts`, beside the terminal:
+- `createLink({ depositId, amountCents, description, returnUrl }) → { linkId, url }`
+- `refund(providerRef, amountCents) → { refundRef }`
+- **Demo:** `SimulatedCheckout`. Its url is `/book/pay/<depositId>`.
+- **Hosted (later):** a Square Payment Links adapter, plus a webhook handler that verifies Square's signature and calls the same `markDepositPaid()`.
+
+No card data touches our code either way.
+
+### Handlers
+
+- **Public** (through `invokePublic`, signed in):
+  - **`bookOnline`:** now returns `{ id, deposit: { id, url, amountCents, holdUntil } | null }`.
+  - **`payDeposit({ appointmentId })`:** a fresh link for the customer's own held booking.
+  - **`depositStatus({ id })`:** for the return page. It's checked against the customer.
+  - **`cancelMine`:** refunds the deposit.
+  - **`myAccount`:** includes the deposit on each appointment.
+  - **`simulateDepositPayment({ depositId, outcome })`:** demo only. It's refused unless the context is demo, like the terminal simulation.
+- **Staff:**
+  - **`requestDeposit({ appointmentId })`:** makes the link.
+  - **`refundDeposit({ id })`:** needs `refunds` permission, and is audited.
+  - **`cancelAppointment({ id, refundDeposit })`**
+  - **`setAppointmentStatus`** to no_show takes `{ keepDeposit }`.
+  - **`startCheckout`:** applies paid deposits for groom lines.
+  - **`cancelSale`:** puts deposits back to Paid.
+  - **Refunds:** handle the `deposit` method.
+  - **Totals:** the new deposit figures.
+
+### Tests
+
+- **Core:**
+  - `bookingDeposit` for each rule, new versus returning customers, and capping at the quote
+  - applying a deposit larger than a discounted total
+- **API:**
+  - Booking with a deposit holds the slot. A second customer can't take it. After the hold runs out, it's released and bookable.
+  - A payment after the hold ran out and the slot was taken is refunded.
+  - Paying flips the appointment to Booked, and paying twice does nothing more.
+  - Checkout applies the deposit, and the sale finishes with the rest paid by card or cash.
+  - A void puts the deposit back to Paid. A later refund sends the deposit part back through the checkout refund.
+  - Canceling in time refunds. Staff cancel with and without a refund. The call-out and customer delete refund.
+  - A no-show keep makes a paid no-show fee sale with a receipt number, which counts in `moneyTotals()`. A refund-on-no-show doesn't.
+  - Every deposit refund and keep is in `audit_log`.
+  - Customers can't see or pay another customer's deposit, and businesses can't see each other's deposits.
+  - The demo simulation is refused outside demo.
+  - Card and cash totals are unchanged by deposits.
+- **Web:**
+  - the review step shows the deposit and its terms
+  - the payment page's Pay and Cancel
+  - the held-booking banner with Pay deposit and Cancel booking
+  - the register ticket showing "Deposit paid online" and the amount due
+  - the no-show and cancel prompts
+
+### Out of scope for 4b
+
+- **Real Square:** payment links and the webhook come with 2d and hosted mode. The interface is ready.
+- **Texts and emails:** the deposit link texted after a phone booking is a preview only. Confirmations and reminders are 4c.
+- **Other deposit types:** percentage deposits, charging a card on file for no-shows, and gift cards or store credit.

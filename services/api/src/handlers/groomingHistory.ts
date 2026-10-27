@@ -3,6 +3,7 @@
 import { sql, type Transaction } from "kysely";
 import { AppError, can, SIZES, todayIso, type Ctx, type PetSize } from "@pet-pos/core";
 import type { DB } from "@pet-pos/db";
+import { paidDeposits } from "../deposits.ts";
 import { defineHandler } from "../handler.ts";
 import { requireInt } from "../shared.ts";
 
@@ -315,6 +316,8 @@ export interface GroomToCheckOut {
   status: string;
   priceCents: number;
   groomerName: string;
+  /** A deposit paid online, taken off at checkout. */
+  depositCents: number;
 }
 
 /** Today's grooms for a customer that aren't paid yet, for the register's customer box. */
@@ -345,6 +348,10 @@ export const groomsToCheckOut = defineHandler<{ customerId: string }, GroomToChe
       .where("a.starts_at", "<", to)
       .orderBy("a.starts_at")
       .execute();
+    const deposits = await paidDeposits(
+      trx,
+      rows.map((r) => r.id),
+    );
     return rows.map((r) => ({
       appointmentId: r.id,
       petName: r.pet_name,
@@ -352,6 +359,7 @@ export const groomsToCheckOut = defineHandler<{ customerId: string }, GroomToChe
       status: r.status,
       priceCents: r.price_cents,
       groomerName: r.groomer_name,
+      depositCents: deposits.get(r.id) ?? 0,
     }));
   },
 });

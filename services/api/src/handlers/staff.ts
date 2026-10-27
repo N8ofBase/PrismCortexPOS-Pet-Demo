@@ -16,6 +16,8 @@ export interface Me {
     groomingTaxable: boolean;
     /** Text customers when their pet is ready. */
     textWhenReady: boolean;
+    /** On a no-show, keep a paid deposit as a fee (or refund it). */
+    keepDepositOnNoShow: boolean;
   };
   /** taxRateMpct: thousandths of a percent (8.875% = 8875). */
   location: { id: string; name: string; taxRateMpct: number } | null;
@@ -45,6 +47,7 @@ export const me = defineHandler<void, Me>({
         "astro_discounts_before_tax",
         "grooming_taxable",
         "text_when_ready",
+        "deposit_no_show",
       ])
       .where("id", "=", ctx.businessId)
       .executeTakeFirstOrThrow();
@@ -65,6 +68,7 @@ export const me = defineHandler<void, Me>({
         astroDiscountsBeforeTax: business.astro_discounts_before_tax,
         groomingTaxable: business.grooming_taxable,
         textWhenReady: business.text_when_ready,
+        keepDepositOnNoShow: business.deposit_no_show === "keep",
       },
       location: location
         ? { id: location.id, name: location.name, taxRateMpct: location.tax_rate_mpct }

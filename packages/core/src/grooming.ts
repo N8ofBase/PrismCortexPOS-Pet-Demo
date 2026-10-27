@@ -103,9 +103,11 @@ export function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: num
   return aStart < bEnd && bStart < aEnd;
 }
 
-export type ApptStatus = "booked" | "checked_in" | "in_progress" | "ready" | "done" | "no_show" | "canceled";
+export type ApptStatus =
+  "held" | "booked" | "checked_in" | "in_progress" | "ready" | "done" | "no_show" | "canceled";
 
 export const STATUS_LABEL: Record<ApptStatus, string> = {
+  held: "Waiting for deposit",
   booked: "Booked",
   checked_in: "Checked in",
   in_progress: "In progress",
@@ -240,4 +242,6 @@ export const appointmentText = {
     `${store}: ${pet}'s groom is now ${shortDay(day)} at ${clockText(time)} with ${groomer}. Reply or call to change it.`,
   canceled: (store: string, pet: string, day: string, time: number) =>
     `${store}: ${pet}'s groom on ${shortDay(day)} at ${clockText(time)} is canceled. Call us to book a new time.`,
+  deposit: (store: string, pet: string, day: string, time: number, amountCents: number, url: string) =>
+    `${store}: please pay the ${formatMoney(amountCents)} deposit for ${pet}'s groom on ${shortDay(day)} at ${clockText(time)}: ${url}`,
 };

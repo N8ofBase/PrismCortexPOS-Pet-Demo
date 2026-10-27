@@ -5,9 +5,11 @@ import {
   AppError,
   addDays,
   atLocal,
+  bookingDeposit,
   canChange,
   CODE_RULES,
   codeFromBytes,
+  formatMoney,
   formatPhone,
   isIsoDate,
   minutesOfDay,
@@ -34,6 +36,7 @@ import {
   toService,
   type ServiceRow,
 } from "../handlers/grooming.ts";
+import { apptWhen, createDeposit, markDepositPaid, refundDeposit, releaseHolds } from "../deposits.ts";
 import { definePublic, type PublicCtx, type SignedCtx } from "./handler.ts";
 
 type Trx = Transaction<DB>;
@@ -63,6 +66,8 @@ async function settings(trx: Trx, businessId: string) {
       "booking_step_minutes",
       "booking_message",
       "public_phone",
+      "deposit_rule",
+      "deposit_hold_minutes",
     ])
     .where("id", "=", businessId)
     .executeTakeFirstOrThrow();
@@ -106,6 +111,10 @@ export interface BookingPage {
   phone: string | null;
   daysAhead: number;
   cutoffHours: number;
+  /** Which bookings pay a deposit: none, every one whose service has one, or new customers only. */
+  depositRule: "off" | "all" | "new";
+  /** Minutes an unpaid booking holds its time. */
+  holdMinutes: number;
   services: {
     id: string;
     name: string;
@@ -113,6 +122,7 @@ export interface BookingPage {
     description: string | null;
     priceCents: Record<PetSize, number>;
     minutes: Record<PetSize, number>;
+    depositCents: number;
   }[];
   groomers: { staffId: string; name: string }[];
 }
@@ -130,6 +140,8 @@ export const bookingPage = definePublic<void, BookingPage>({
       phone: b.public_phone,
       daysAhead: b.booking_days_ahead,
       cutoffHours: b.booking_cutoff_hours,
+      depositRule: b.deposit_rule,
+      holdMinutes: b.deposit_hold_minutes,
       services: (await onlineServices(trx)).map((s) => ({
         id: s.id,
         name: s.name,
@@ -137,6 +149,7 @@ export const bookingPage = definePublic<void, BookingPage>({
         description: s.description,
         priceCents: s.priceCents,
         minutes: s.minutes,
+        depositCents: s.kind === "main" ? s.depositCents : 0,
       })),
       groomers: (await onlineGroomers(trx)).map((g) => ({ staffId: g.id, name: g.name })),
     };
@@ -315,10 +328,23 @@ export interface MyAppointment {
   status: string;
   /** Before the store's cutoff, so it can still be canceled or moved online. */
   canChange: boolean;
+  /** Waiting for the deposit: when the held time is let go. */
+  holdUntil: Date | null;
+  deposit: MyDeposit | null;
+}
+
+export interface MyDeposit {
+  id: string;
+  amountCents: number;
+  status: "pending" | "paid" | "applied" | "refunded" | "kept" | "expired" | "canceled";
+  /** Where to pay, while it's unpaid. */
+  url: string | null;
 }
 
 export interface MyAccount {
   name: string;
+  /** No finished groom yet: "New customers only" deposits apply. */
+  newCustomer: boolean;
   pets: MyPet[];
   upcoming: MyAppointment[];
   recent: MyAppointment[];
@@ -360,6 +386,7 @@ export const myAccount = definePublic<void, MyAccount>({
       .where("id", "=", customerId)
       .executeTakeFirstOrThrow();
     const b = await settings(trx, ctx.businessId);
+    await releaseHolds(trx);
     const today = atLocal(todayIso(), 0);
     const rows = await appointmentRows(trx, { customerId, from: addDaysDate(today, -365) });
     const now = new Date();
@@ -378,12 +405,22 @@ export const myAccount = definePublic<void, MyAccount>({
       priceCents: r.priceCents,
       status: r.status,
       canChange: r.status === "booked" && canChange(r.startsAt, now, b.booking_cutoff_hours),
+      holdUntil: r.holdUntil,
+      deposit: r.deposit
+        ? {
+            id: r.deposit.id,
+            amountCents: r.deposit.amountCents,
+            status: r.deposit.status,
+            url: r.deposit.url,
+          }
+        : null,
     }));
     return {
       name: c.name,
+      newCustomer: await isNewCustomer(trx, customerId),
       pets: await myPets(trx, customerId),
       upcoming: mine
-        .filter((a) => a.status === "booked" || a.status === "checked_in")
+        .filter((a) => a.status === "held" || a.status === "booked" || a.status === "checked_in")
         .filter((a) => a.day >= todayIso()),
       recent: mine
         .filter((a) => a.status === "done")
@@ -392,6 +429,16 @@ export const myAccount = definePublic<void, MyAccount>({
     };
   },
 });
+
+async function isNewCustomer(trx: Trx, customerId: string): Promise<boolean> {
+  const done = await trx
+    .selectFrom("appointments")
+    .select("id")
+    .where("customer_id", "=", customerId)
+    .where("status", "=", "done")
+    .executeTakeFirst();
+  return !done;
+}
 
 function addDaysDate(d: Date, n: number): Date {
   const x = new Date(d);
@@ -665,6 +712,13 @@ export const bookOnline = definePublic<
       start: input.start,
       ignoreId: null,
     });
+    const b = await settings(trx, ctx.businessId);
+    const depositCents = bookingDeposit({
+      rule: b.deposit_rule,
+      serviceDepositCents: w.main.depositCents,
+      quoteCents: w.quote.priceCents,
+      isNewCustomer: await isNewCustomer(trx, c.customerId),
+    });
     const locationId = await currentLocationId(trx);
     const row = await guarded(trx, () =>
       trx
@@ -685,6 +739,12 @@ export const bookOnline = definePublic<
           price_cents: w.quote.priceCents,
           notes: input.notes?.trim().slice(0, 500) || null,
           source: "online",
+          ...(depositCents
+            ? {
+                status: "held" as const,
+                hold_expires_at: new Date(Date.now() + b.deposit_hold_minutes * 60_000),
+              }
+            : {}),
         })
         .returning("id")
         .executeTakeFirstOrThrow(),
@@ -701,6 +761,12 @@ export const bookOnline = definePublic<
           minutes: a.minutes[w.pet.size],
         })
         .execute();
+    if (depositCents)
+      await createDeposit(trx, {
+        businessId: ctx.businessId,
+        appointmentId: row.id,
+        amountCents: depositCents,
+      });
     return mine(trx, ctx, row.id);
   },
 });
@@ -712,15 +778,17 @@ async function mine(trx: Trx, ctx: PublicCtx, id: string): Promise<MyAppointment
   return a;
 }
 
-async function ownBooked(trx: Trx, ctx: SignedCtx, id: string) {
+async function ownBooked(trx: Trx, ctx: SignedCtx, id: string, allowHeld = false) {
+  await releaseHolds(trx);
   const a = await trx
     .selectFrom("appointments")
-    .select(["id", "status", "starts_at", "pet_id", "service_id"])
+    .select(["id", "status", "starts_at", "pet_id", "service_id", "deposit_id"])
     .where("id", "=", id)
     .where("customer_id", "=", ctx.customerId)
     .forUpdate()
     .executeTakeFirst();
   if (!a) throw new AppError("not_found", "That appointment isn't on your account.");
+  if (allowHeld && a.status === "held") return a;
   const b = await settings(trx, ctx.businessId);
   if (a.status !== "booked" || !canChange(a.starts_at, new Date(), b.booking_cutoff_hours))
     throw new AppError(
@@ -733,14 +801,139 @@ async function ownBooked(trx: Trx, ctx: SignedCtx, id: string) {
 export const cancelMine = definePublic<{ id: string }, void>({
   signedIn: true,
   async run(trx, ctx, { id }) {
-    await ownBooked(trx, ctx as SignedCtx, id);
+    const a = await ownBooked(trx, ctx as SignedCtx, id, true);
     await trx
       .updateTable("appointments")
-      .set({ status: "canceled", canceled_at: new Date() })
+      .set({ status: "canceled", canceled_at: new Date(), hold_expires_at: null })
       .where("id", "=", id)
       .execute();
+    // Canceling in time gives the whole deposit back.
+    if (a.deposit_id)
+      await refundDeposit(
+        trx,
+        { businessId: ctx.businessId, staffId: null },
+        a.deposit_id,
+        "canceled online by the customer",
+      );
   },
 });
+
+// ---- deposits ----
+
+export interface DepositView {
+  id: string;
+  appointmentId: string;
+  status: MyDeposit["status"];
+  amountCents: number;
+  storeName: string;
+  /** "Biscuit · Full groom, Thu Oct 22, 9:00 AM" */
+  description: string;
+  priceCents: number;
+  holdUntil: Date | null;
+  url: string | null;
+  /** What happened, in a sentence, after paying or canceling. */
+  message: string | null;
+}
+
+async function depositView(
+  trx: Trx,
+  ctx: SignedCtx,
+  id: string,
+  message: string | null = null,
+): Promise<DepositView> {
+  const d = await trx
+    .selectFrom("deposits as d")
+    .innerJoin("appointments as a", "a.id", "d.appointment_id")
+    .innerJoin("businesses as b", "b.id", "d.business_id")
+    .select([
+      "d.id",
+      "d.status",
+      "d.amount_cents",
+      "d.link_url",
+      "a.id as appointment_id",
+      "a.status as appt_status",
+      "a.hold_expires_at",
+      "a.pet_name",
+      "a.service_name",
+      "a.starts_at",
+      "a.price_cents",
+      "b.name as store",
+    ])
+    .where("d.id", "=", id)
+    .where("d.customer_id", "=", ctx.customerId)
+    .executeTakeFirst();
+  if (!d) throw new AppError("not_found", "That deposit isn't on your account.");
+  return {
+    id: d.id,
+    appointmentId: d.appointment_id,
+    status: d.status,
+    amountCents: d.amount_cents,
+    storeName: d.store,
+    description: `${d.pet_name} · ${d.service_name}, ${apptWhen(d.starts_at)}`,
+    priceCents: d.price_cents,
+    holdUntil: d.appt_status === "held" ? d.hold_expires_at : null,
+    url: d.status === "pending" ? d.link_url : null,
+    message,
+  };
+}
+
+/** The deposit and its booking, for the payment page and the page the customer returns to. */
+export const depositStatus = definePublic<{ id: string }, DepositView>({
+  signedIn: true,
+  async run(trx, ctx, { id }) {
+    await releaseHolds(trx);
+    return depositView(trx, ctx as SignedCtx, id);
+  },
+});
+
+/** A fresh look at the payment link for the customer's own held booking. */
+export const payDeposit = definePublic<{ appointmentId: string }, DepositView>({
+  signedIn: true,
+  async run(trx, ctx, { appointmentId }) {
+    const c = ctx as SignedCtx;
+    await releaseHolds(trx);
+    const a = await trx
+      .selectFrom("appointments")
+      .select(["status", "deposit_id"])
+      .where("id", "=", appointmentId)
+      .where("customer_id", "=", c.customerId)
+      .executeTakeFirst();
+    if (!a) throw new AppError("not_found", "That appointment isn't on your account.");
+    if (a.status !== "held" || !a.deposit_id)
+      throw new AppError("invalid", "The hold on this time ran out. Please book again.");
+    return depositView(trx, c, a.deposit_id);
+  },
+});
+
+/** Demo only: stands in for Square's payment page and its webhook. */
+export const simulateDepositPayment = definePublic<{ id: string; outcome: "paid" | "canceled" }, DepositView>(
+  {
+    signedIn: true,
+    async run(trx, ctx, { id, outcome }) {
+      if (!ctx.demo) throw new AppError("forbidden", "Payments come from Square here.");
+      const c = ctx as SignedCtx;
+      const before = await depositView(trx, c, id);
+      if (outcome === "canceled")
+        return depositView(
+          trx,
+          c,
+          id,
+          before.holdUntil ? "Payment canceled. Your time is still held." : null,
+        );
+      const bytes = new Uint8Array(9);
+      crypto.getRandomValues(bytes);
+      const ref = `sim_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+      const r = await markDepositPaid(trx, id, ref);
+      const message =
+        r === "refunded_late"
+          ? `Sorry, the hold ran out before your payment came in. Your ${formatMoney(before.amountCents)} deposit was refunded.`
+          : r === "already"
+            ? "This deposit was already paid."
+            : null;
+      return depositView(trx, c, id, message);
+    },
+  },
+);
 
 export const rescheduleMine = definePublic<
   { id: string; staffId: string | null; day: string; start: number },

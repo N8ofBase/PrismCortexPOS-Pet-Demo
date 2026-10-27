@@ -33,6 +33,7 @@ export async function ensureDemo(db: Kysely<DB>): Promise<string> {
     await once(trx, businessId, "discounts", "discounts", seedDiscounts);
     await once(trx, businessId, "grooming", "services", seedGrooming);
     await once(trx, businessId, "grooming_supplies", "service_supplies", seedGroomingSupplies);
+    await once(trx, businessId, "deposits", "deposits", seedDeposits);
     return businessId;
   });
 }
@@ -45,7 +46,7 @@ async function once(
   trx: Transaction<DB>,
   businessId: string,
   part: string,
-  table: "products" | "customers" | "discounts" | "services" | "service_supplies",
+  table: "products" | "customers" | "discounts" | "services" | "service_supplies" | "deposits",
   seed: (trx: Transaction<DB>, businessId: string) => Promise<void>,
 ): Promise<void> {
   const done = await trx
@@ -79,6 +80,7 @@ async function seedBusiness(trx: Transaction<DB>): Promise<string> {
       booking_enabled: true,
       public_phone: "2125550199",
       booking_message: "Book a bath or full groom for your pet. New customers are welcome!",
+      deposit_rule: "all",
       is_demo: true,
     })
     .returning("id")
@@ -613,6 +615,43 @@ async function seedGrooming(trx: Transaction<DB>, businessId: string): Promise<v
   await book("Biscuit", a.id, full, 9 * 60, "checked_in", "M", 8000, 130, 15, "Short summer cut", teeth);
   await book("Rex", b.id, bath, 10 * 60 + 30, "in_progress", "L", 6000, 90, 15, null);
   await book("Mo", a.id, bath, 13 * 60, "booked", "S", 3500, 60, 15, "Nervous with dryers");
+}
+
+/** Biscuit's full groom today was booked online with a $20.00 deposit, so the register shows it applied. */
+async function seedDeposits(trx: Transaction<DB>, businessId: string): Promise<void> {
+  const appt = await trx
+    .selectFrom("appointments")
+    .select(["id", "customer_id"])
+    .where("business_id", "=", businessId)
+    .where("is_demo", "=", true)
+    .where("pet_name", "=", "Biscuit")
+    .where("status", "not in", ["done", "canceled", "no_show"])
+    .where("sale_id", "is", null)
+    .where("deposit_id", "is", null)
+    .orderBy("starts_at", "desc")
+    .executeTakeFirst();
+  if (!appt) return;
+  const paidAt = new Date(Date.now() - 2 * 86_400_000);
+  const dep = await trx
+    .insertInto("deposits")
+    .values({
+      business_id: businessId,
+      appointment_id: appt.id,
+      customer_id: appt.customer_id,
+      amount_cents: 2000,
+      status: "paid",
+      link_id: "sim_link_demo",
+      provider_ref: "sim_demo_deposit",
+      paid_at: paidAt,
+      is_demo: true,
+    })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  await trx
+    .updateTable("appointments")
+    .set({ deposit_id: dep.id, source: "online" })
+    .where("id", "=", appt.id)
+    .execute();
 }
 
 /** A simple sample picture (SVG), so the demo's grooming history has photos to show. */

@@ -23,7 +23,7 @@ export function CustomerBox({
   onDrop: () => void;
   onAddProduct: (p: ProductRow) => void;
   groomsOnTicket?: string[];
-  onAddGroom?: (g: { appointmentId: string; name: string; priceCents: number }) => void;
+  onAddGroom?: (g: { appointmentId: string; name: string; priceCents: number; depositCents: number }) => void;
 }) {
   if (customer)
     return (
@@ -237,7 +237,7 @@ export function GroomsWaiting({
 }: {
   customerId: string;
   onTicket: string[];
-  onAdd: (g: { appointmentId: string; name: string; priceCents: number }) => void;
+  onAdd: (g: { appointmentId: string; name: string; priceCents: number; depositCents: number }) => void;
 }) {
   const { api } = useSession();
   const q = useQuery({
@@ -265,10 +265,12 @@ export function GroomsWaiting({
                 appointmentId: g.appointmentId,
                 name: `${g.label} · ${g.petName}`,
                 priceCents: g.priceCents,
+                depositCents: g.depositCents,
               })
             }
           >
             Add {formatMoney(g.priceCents)}
+            {g.depositCents > 0 && ` (${formatMoney(g.depositCents)} deposit paid)`}
           </button>
         </div>
       ))}

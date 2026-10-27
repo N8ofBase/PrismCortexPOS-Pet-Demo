@@ -23,6 +23,8 @@ const page: BookingPage = {
   phone: "2125550199",
   daysAhead: 30,
   cutoffHours: 24,
+  depositRule: "off",
+  holdMinutes: 15,
   services: [
     {
       id: "bath",
@@ -31,6 +33,7 @@ const page: BookingPage = {
       description: null,
       priceCents: { S: 3500, M: 4500, L: 6000, XL: 7500 },
       minutes: { S: 60, M: 75, L: 90, XL: 120 },
+      depositCents: 0,
     },
     {
       id: "teeth",
@@ -39,6 +42,7 @@ const page: BookingPage = {
       description: null,
       priceCents: { S: 1000, M: 1000, L: 1000, XL: 1000 },
       minutes: { S: 10, M: 10, L: 10, XL: 10 },
+      depositCents: 0,
     },
   ],
   groomers: [{ staffId: "g1", name: "Groomer A" }],

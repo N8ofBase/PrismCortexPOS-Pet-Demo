@@ -17,6 +17,7 @@ import {
 } from "@pet-pos/core";
 import type { DB } from "@pet-pos/db";
 import { defineHandler } from "../handler.ts";
+import { checkout } from "../payments/checkout.ts";
 import { terminal } from "../payments/terminal.ts";
 import { audit, currentLocationId } from "../shared.ts";
 
@@ -316,17 +317,21 @@ export const refundSale = defineHandler<RefundSaleInput, RefundResult>({
         })
         .execute();
 
-    // Money back: card through the reader (simulated in the demo), then cash from the drawer.
+    // Money back: card through the reader (simulated in the demo), a deposit through its
+    // payment link, then cash from the drawer.
     for (const p of plan.payments) {
       const pay = await trx
         .selectFrom("payments")
         .select(["provider_ref"])
         .where("id", "=", p.paymentId)
         .executeTakeFirstOrThrow();
-      const ref =
-        p.method === "card" && pay.provider_ref
+      const ref = !pay.provider_ref
+        ? null
+        : p.method === "card"
           ? (await terminal.refund(pay.provider_ref, p.amountCents)).refundRef
-          : null;
+          : p.method === "deposit"
+            ? (await checkout.refund(pay.provider_ref, p.amountCents)).refundRef
+            : null;
       await trx
         .insertInto("refund_payments")
         .values({

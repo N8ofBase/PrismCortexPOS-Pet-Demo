@@ -34,6 +34,9 @@ export interface BusinessesTable {
   booking_message: string | null;
   /** 10 digits, shown to customers. */
   public_phone: string | null;
+  deposit_rule: Generated<DepositRule>;
+  deposit_hold_minutes: Generated<number>;
+  deposit_no_show: Generated<"keep" | "refund">;
   is_demo: Generated<boolean>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
@@ -323,11 +326,13 @@ export interface SaleDiscountsTable {
 
 export type PaymentStatus = "pending" | "completed" | "declined" | "canceled" | "refunded";
 
+export type PaymentMethod = "card" | "cash" | "deposit";
+
 export interface PaymentsTable {
   id: Generated<string>;
   business_id: string;
   sale_id: string;
-  method: "card" | "cash";
+  method: PaymentMethod;
   provider: "square" | "cash";
   provider_ref: string | null;
   status: PaymentStatus;
@@ -337,6 +342,7 @@ export interface PaymentsTable {
   refunded_cents: Generated<number>;
   staff_id: string | null;
   completed_at: Date | null;
+  deposit_id: string | null;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
 }
@@ -389,7 +395,7 @@ export interface RefundPaymentsTable {
   business_id: string;
   refund_id: string;
   payment_id: string;
-  method: "card" | "cash";
+  method: PaymentMethod;
   amount_cents: number;
   provider_ref: string | null;
 }
@@ -413,7 +419,7 @@ export type ImportEntity =
   "customer" | "pet" | "vaccination" | "product" | "program" | "punch" | "stock" | "sale";
 
 export type AppointmentStatus =
-  "booked" | "checked_in" | "in_progress" | "ready" | "done" | "no_show" | "canceled";
+  "held" | "booked" | "checked_in" | "in_progress" | "ready" | "done" | "no_show" | "canceled";
 
 export interface ServicesTable {
   id: Generated<string>;
@@ -489,7 +495,8 @@ export interface AppointmentsTable {
   done_at: Date | null;
   canceled_at: Date | null;
   sale_id: string | null;
-  deposit_payment_id: string | null;
+  deposit_id: string | null;
+  hold_expires_at: Date | null;
   supplies_used_at: Date | null;
   source: Generated<"staff" | "online">;
   is_demo: Generated<boolean>;
@@ -557,11 +564,36 @@ export interface CustomerSessionsTable {
   created_at: CreatedAt;
 }
 
+export type DepositRule = "off" | "all" | "new";
+export type DepositStatus = "pending" | "paid" | "applied" | "refunded" | "kept" | "expired" | "canceled";
+
+export interface DepositsTable {
+  id: Generated<string>;
+  business_id: string;
+  appointment_id: string;
+  customer_id: string | null;
+  amount_cents: number;
+  refunded_cents: Generated<number>;
+  status: Generated<DepositStatus>;
+  provider: Generated<"square">;
+  link_id: string | null;
+  link_url: string | null;
+  provider_ref: string | null;
+  refund_ref: string | null;
+  paid_at: Date | null;
+  applied_sale_id: string | null;
+  kept_sale_id: string | null;
+  refunded_at: Date | null;
+  is_demo: Generated<boolean>;
+  created_at: CreatedAt;
+  updated_at: UpdatedAt;
+}
+
 export interface AppointmentMessagesTable {
   id: Generated<string>;
   business_id: string;
   appointment_id: string;
-  kind: "ready" | "moved" | "canceled";
+  kind: "ready" | "moved" | "canceled" | "deposit";
   channel: Generated<"sms">;
   to_address: string;
   body: string;
@@ -683,6 +715,7 @@ export interface DB {
   appointment_messages: AppointmentMessagesTable;
   customer_login_codes: CustomerLoginCodesTable;
   customer_sessions: CustomerSessionsTable;
+  deposits: DepositsTable;
 }
 
 export type Business = Selectable<BusinessesTable>;

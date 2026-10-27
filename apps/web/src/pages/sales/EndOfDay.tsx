@@ -193,6 +193,13 @@ function CountForm({ s }: { s: DrawerSummary }) {
           In the demo this comes from the simulated card reader. With a real Square Terminal, check it against
           Square's batch report.
         </p>
+        {(t.depositsTakenCents > 0 || t.depositsUsedCents > 0 || t.depositsKeptCents > 0) && (
+          <p className="small" style={{ margin: 0 }}>
+            Online deposits taken {formatMoney(t.depositsTakenCents)} · used at the register{" "}
+            {formatMoney(t.depositsUsedCents)} · kept as no-show or cancellation fees{" "}
+            {formatMoney(t.depositsKeptCents)}. These come through Square online, not this reader.
+          </p>
+        )}
       </section>
 
       <form className="panel" onSubmit={submit} style={{ display: "grid", gap: 12 }}>

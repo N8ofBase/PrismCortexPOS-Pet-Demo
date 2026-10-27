@@ -1079,6 +1079,11 @@ button.big {
   border-left: 4px solid var(--good);
   color: var(--muted);
 }
+.appt.held {
+  border-style: dashed;
+  background: var(--surface);
+  opacity: 0.85;
+}
 .appt.no_show {
   border-color: var(--line);
   color: var(--muted);

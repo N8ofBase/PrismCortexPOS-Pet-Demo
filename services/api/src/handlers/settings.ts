@@ -32,6 +32,10 @@ export interface BookingSettings {
   message: string | null;
   /** 10 digits, shown to customers. */
   phone: string | null;
+  /** Deposits (4b): which online bookings pay one, how long an unpaid one holds its time, and no-shows. */
+  depositRule: "off" | "all" | "new";
+  holdMinutes: 10 | 15 | 30;
+  noShow: "keep" | "refund";
 }
 
 /** Largest logo data URL accepted (the browser resizes to 256 px first). */
@@ -57,6 +61,9 @@ export const getSettings = defineHandler<void, StoreSettings>({
         "booking_cutoff_hours",
         "booking_step_minutes",
         "booking_message",
+        "deposit_rule",
+        "deposit_hold_minutes",
+        "deposit_no_show",
         "public_phone",
       ])
       .where("id", "=", ctx.businessId)
@@ -87,6 +94,9 @@ export const getSettings = defineHandler<void, StoreSettings>({
         stepMinutes: b.booking_step_minutes as 15 | 30 | 60,
         message: b.booking_message,
         phone: b.public_phone,
+        depositRule: b.deposit_rule,
+        holdMinutes: b.deposit_hold_minutes as 10 | 15 | 30,
+        noShow: b.deposit_no_show,
       },
     };
   },
@@ -110,7 +120,8 @@ export interface SettingsInput {
   /** Left out: unchanged. */
   textWhenReady?: boolean;
   /** Left out: unchanged. The phone can be typed in any format. */
-  booking?: Omit<BookingSettings, "phone"> & { phone: string | null };
+  booking?: Omit<BookingSettings, "phone" | "depositRule" | "holdMinutes" | "noShow"> &
+    Partial<Pick<BookingSettings, "depositRule" | "holdMinutes" | "noShow">> & { phone: string | null };
 }
 
 export const updateSettings = defineHandler<SettingsInput, void>({
@@ -148,6 +159,12 @@ export const updateSettings = defineHandler<SettingsInput, void>({
         errors.bookingStep = "Offer times every 15, 30 or 60 minutes.";
       if (bk.message && bk.message.length > 500)
         errors.bookingMessage = "Keep the welcome message under 500 characters.";
+      if (bk.depositRule !== undefined && !["off", "all", "new"].includes(bk.depositRule))
+        errors.depositRule = "Pick when to ask for a deposit.";
+      if (bk.holdMinutes !== undefined && ![10, 15, 30].includes(bk.holdMinutes))
+        errors.holdMinutes = "Hold an unpaid booking for 10, 15 or 30 minutes.";
+      if (bk.noShow !== undefined && !["keep", "refund"].includes(bk.noShow))
+        errors.noShow = "Pick keep or refund for no-shows.";
       if (bk.phone?.trim()) {
         phone = normalizePhone(bk.phone);
         if (!phone) errors.publicPhone = "Enter the store's 10-digit phone number.";
@@ -177,6 +194,9 @@ export const updateSettings = defineHandler<SettingsInput, void>({
               booking_step_minutes: bk.stepMinutes,
               booking_message: bk.message?.trim() || null,
               public_phone: phone,
+              ...(bk.depositRule ? { deposit_rule: bk.depositRule } : {}),
+              ...(bk.holdMinutes ? { deposit_hold_minutes: bk.holdMinutes } : {}),
+              ...(bk.noShow ? { deposit_no_show: bk.noShow } : {}),
             }
           : {}),
         name,

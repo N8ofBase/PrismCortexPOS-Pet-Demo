@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import {
+  bookingDeposit,
   clockText,
   durationText,
   formatMoney,
@@ -41,10 +42,13 @@ export function BookFlow({
   pets,
   start,
   reschedule,
+  newCustomer = false,
   onDone,
   onCancel,
 }: {
   pets: MyPet[];
+  /** No finished groom yet, for "New customers only" deposits. */
+  newCustomer?: boolean;
   start?: BookStart;
   reschedule?: MyAppointment;
   onDone: (a: MyAppointment) => void;
@@ -113,6 +117,15 @@ export function BookFlow({
   });
 
   const est = pet?.size && serviceId ? estimate(page, serviceId, addonIds, pet.size) : null;
+  const depositCents =
+    est && !reschedule
+      ? bookingDeposit({
+          rule: page.depositRule,
+          serviceDepositCents: page.services.find((s) => s.id === serviceId)?.depositCents ?? 0,
+          quoteCents: est.priceCents,
+          isNewCustomer: newCustomer,
+        })
+      : 0;
   const dayTimes = times.data?.find((d) => d.day === day)?.times ?? [];
 
   return (
@@ -294,10 +307,18 @@ export function BookFlow({
             {est && !reschedule && (
               <>
                 <br />
-                {formatMoney(est.priceCents)} · about {durationText(est.minutes)}. Pay at pickup.
+                {formatMoney(est.priceCents)} · about {durationText(est.minutes)}.{" "}
+                {depositCents ? "" : "Pay at pickup."}
               </>
             )}
           </p>
+          {depositCents > 0 && (
+            <p className="note" style={{ margin: 0 }}>
+              A {formatMoney(depositCents)} deposit holds your time. You pay it now, and it comes off the{" "}
+              {formatMoney(est!.priceCents)} at pickup. It's refunded if you cancel at least{" "}
+              {page.cutoffHours} hours before. We hold the time for {page.holdMinutes} minutes while you pay.
+            </p>
+          )}
           {!reschedule && (
             <label>
               Anything we should know?
@@ -321,7 +342,11 @@ export function BookFlow({
               disabled={book.isPending}
               onClick={() => book.mutate()}
             >
-              {reschedule ? "Move my appointment" : "Book"}
+              {reschedule
+                ? "Move my appointment"
+                : depositCents
+                  ? `Book and pay ${formatMoney(depositCents)}`
+                  : "Book"}
             </button>
             {onCancel && (
               <button type="button" onClick={onCancel}>

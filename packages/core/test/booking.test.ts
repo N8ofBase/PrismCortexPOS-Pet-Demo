@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { canChange, codeFromBytes, normalizeContact, openTimes, pickGroomer } from "../src/index.ts";
+import {
+  applyDeposit,
+  canChange,
+  codeFromBytes,
+  bookingDeposit,
+  normalizeContact,
+  openTimes,
+  pickGroomer,
+} from "../src/index.ts";
 
 describe("open times", () => {
   const a = { staffId: "a", hours: { start: 480, end: 960 }, timeOff: [], busy: [{ start: 540, end: 685 }] };
@@ -59,5 +67,24 @@ describe("cutoff and sign-in", () => {
     expect(normalizeContact("Pat@Example.com")).toEqual({ kind: "email", value: "pat@example.com" });
     expect(normalizeContact("555-0100")).toBeNull();
     expect(normalizeContact("pat@")).toBeNull();
+  });
+});
+
+describe("deposits", () => {
+  const base = { serviceDepositCents: 2000, quoteCents: 7000, isNewCustomer: false };
+  it("follows the store's rule", () => {
+    expect(bookingDeposit({ ...base, rule: "off" })).toBe(0);
+    expect(bookingDeposit({ ...base, rule: "all" })).toBe(2000);
+    expect(bookingDeposit({ ...base, rule: "new" })).toBe(0);
+    expect(bookingDeposit({ ...base, rule: "new", isNewCustomer: true })).toBe(2000);
+  });
+  it("is never more than the quote, and nothing when the service has none", () => {
+    expect(bookingDeposit({ ...base, rule: "all", quoteCents: 1500 })).toBe(1500);
+    expect(bookingDeposit({ ...base, rule: "all", serviceDepositCents: 0 })).toBe(0);
+  });
+  it("applies up to the sale total and refunds the rest", () => {
+    expect(applyDeposit(7500, 2000)).toEqual({ appliedCents: 2000, refundCents: 0 });
+    expect(applyDeposit(1200, 2000)).toEqual({ appliedCents: 1200, refundCents: 800 });
+    expect(applyDeposit(0, 2000)).toEqual({ appliedCents: 0, refundCents: 2000 });
   });
 });

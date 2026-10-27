@@ -299,7 +299,8 @@ describe("changing a booking", () => {
       630,
     );
 
-    const soon = new Date(Date.now() + 3600_000);
+    // Inside the 24-hour cutoff, but tomorrow, clear of today's demo grooms.
+    const soon = new Date(Date.now() + 23 * 3600_000);
     await db
       .updateTable("appointments")
       .set({

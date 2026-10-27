@@ -1,7 +1,7 @@
 // The receipt, built once here so the printed copy, the screen and what's sent by
 // email or text all match. 32 columns wide like a thermal printer (the prototype's format).
 import { formatMoney } from "./money.ts";
-import { REFUND_REASON_LABEL, type RefundReasonCode } from "./refund.ts";
+import { REFUND_REASON_LABEL, type PaymentMethod, type RefundReasonCode } from "./refund.ts";
 import { formatTaxPercent } from "./tax.ts";
 
 export interface ReceiptRefund {
@@ -15,7 +15,7 @@ export interface ReceiptRefund {
   amountCents: number;
   taxCents: number;
   lines: { name: string; qty: number; amountCents: number }[];
-  payments: { method: "card" | "cash"; amountCents: number }[];
+  payments: { method: PaymentMethod; amountCents: number }[];
 }
 
 export interface ReceiptData {
@@ -39,7 +39,7 @@ export interface ReceiptData {
   }[];
   discounts: { name: string; source: string; amountCents: number; note: string | null }[];
   payments: {
-    method: "card" | "cash";
+    method: PaymentMethod;
     status: string;
     amountCents: number;
     tenderedCents: number | null;
@@ -56,6 +56,12 @@ export interface ReceiptData {
 }
 
 const W = 32;
+
+const PAID_BY: Record<PaymentMethod, string> = {
+  card: "Card (Square)",
+  cash: "Cash",
+  deposit: "Deposit paid online",
+};
 const pad = (left: string, right: string) => {
   const room = W - right.length - 1;
   const l = left.length > room ? `${left.slice(0, room - 1)}…` : left;
@@ -90,7 +96,7 @@ export function receiptText(r: ReceiptData): string {
   out.push(pad(`Tax ${formatTaxPercent(r.taxRateMpct)}`, formatMoney(r.taxCents)));
   out.push(pad("TOTAL", formatMoney(r.totalCents)));
   for (const p of r.payments) {
-    out.push(pad(p.method === "card" ? "Card (Square)" : "Cash", formatMoney(p.amountCents)));
+    out.push(pad(PAID_BY[p.method], formatMoney(p.amountCents)));
     if (p.method === "cash" && p.changeCents) out.push(pad("Change", formatMoney(p.changeCents)));
     if (p.status === "refunded") out.push(pad("  Refunded", `-${formatMoney(p.amountCents)}`));
   }
@@ -99,7 +105,7 @@ export function receiptText(r: ReceiptData): string {
     for (const l of f.lines) out.push(pad(`  ${l.qty}× ${l.name}`, `-${formatMoney(l.amountCents)}`));
     if (f.taxCents) out.push(pad("  Tax", `-${formatMoney(f.taxCents)}`));
     for (const p of f.payments)
-      out.push(pad(p.method === "card" ? "  To card" : "  Cash back", `-${formatMoney(p.amountCents)}`));
+      out.push(pad(p.method === "cash" ? "  Cash back" : "  To card", `-${formatMoney(p.amountCents)}`));
     out.push(`  ${REFUND_REASON_LABEL[f.reason]}${f.note ? `: ${f.note}` : ""}`.slice(0, W));
   }
   if (r.refundedCents) {

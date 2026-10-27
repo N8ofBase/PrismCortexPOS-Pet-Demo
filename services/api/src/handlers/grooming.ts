@@ -30,6 +30,7 @@ import type { DB } from "@pet-pos/db";
 import { defineHandler } from "../handler.ts";
 import { audit, currentLocationId, requireInt } from "../shared.ts";
 import { returnSupplies, useSupplies } from "./supplies.ts";
+import { keepDeposit, refundDeposit, refundDepositsFor, releaseHolds } from "../deposits.ts";
 
 type Trx = Transaction<DB>;
 type Sized = Record<PetSize, number>;
@@ -377,10 +378,25 @@ export interface AppointmentRow {
   receiptNumber: number | null;
   /** Money refunded on that sale (for "Refunded" on a paid groom). */
   saleRefundedCents: number;
+  /** A held online booking: when its time to pay runs out. */
+  holdUntil: Date | null;
+  deposit: AppointmentDeposit | null;
   /** Grooming notes on this appointment. */
   noteCount: number;
   /** The pet's most recent note from an earlier groom: "last time: short summer cut". */
   lastNote: string | null;
+}
+
+export interface AppointmentDeposit {
+  id: string;
+  amountCents: number;
+  refundedCents: number;
+  status: "pending" | "paid" | "applied" | "refunded" | "kept" | "expired" | "canceled";
+  paidAt: Date | null;
+  /** The payment link, while it's unpaid. */
+  url: string | null;
+  /** The no-show or cancellation fee sale, when it was kept. */
+  keptReceiptNumber: number | null;
 }
 
 export async function appointmentRows(
@@ -392,9 +408,20 @@ export async function appointmentRows(
     .innerJoin("staff as st", "st.id", "a.staff_id")
     .leftJoin("customers as c", "c.id", "a.customer_id")
     .leftJoin("pets as p", "p.id", "a.pet_id")
+    .leftJoin("deposits as d", "d.id", "a.deposit_id")
     .select([
       "a.id",
       "a.status",
+      "a.hold_expires_at",
+      "d.id as deposit_id",
+      "d.amount_cents as deposit_cents",
+      "d.refunded_cents as deposit_refunded_cents",
+      "d.status as deposit_status",
+      "d.paid_at as deposit_paid_at",
+      "d.link_url as deposit_url",
+      sql<number | null>`(SELECT s.receipt_number FROM sales s WHERE s.id = d.kept_sale_id)`.as(
+        "deposit_kept_receipt",
+      ),
       "a.staff_id",
       "st.name as groomer_name",
       "a.customer_id",
@@ -488,6 +515,18 @@ export async function appointmentRows(
       saleRefundedCents: r.sale_refunded_cents,
       noteCount: r.note_count,
       lastNote: r.last_note,
+      holdUntil: r.status === "held" ? r.hold_expires_at : null,
+      deposit: r.deposit_id
+        ? {
+            id: r.deposit_id,
+            amountCents: r.deposit_cents!,
+            refundedCents: r.deposit_refunded_cents!,
+            status: r.deposit_status!,
+            paidAt: r.deposit_paid_at,
+            url: r.deposit_status === "pending" ? r.deposit_url : null,
+            keptReceiptNumber: r.deposit_kept_receipt,
+          }
+        : null,
       rabiesLapsed: rabiesLapsed(
         vacc
           .filter((v) => v.pet_id === r.pet_id)
@@ -530,6 +569,7 @@ export const groomingWeek = defineHandler<{ start: string }, { start: string; da
 });
 
 export async function loadDay(trx: Trx, day: string): Promise<GroomingDay> {
+  await releaseHolds(trx);
   const { from, to, weekday } = dayBounds(day);
   const appointments = await appointmentRows(trx, { from, to });
   const staff = await trx
@@ -648,6 +688,7 @@ export async function checkSlot(
   },
 ): Promise<Slot> {
   if (!isIsoDate(v.day)) throw new AppError("invalid", "Pick a day.");
+  await releaseHolds(trx);
   const start = v.start;
   const end = start + v.minutes;
   const blockEnd = end + v.buffer;
@@ -909,12 +950,15 @@ const STAMP: Partial<Record<ApptStatus, "checked_in_at" | "started_at" | "ready_
 };
 
 /** Moves an appointment along (or back one step). Groomers can start a groom and mark it ready. */
-export const setAppointmentStatus = defineHandler<{ id: string; status: ApptStatus }, AppointmentRow>({
+export const setAppointmentStatus = defineHandler<
+  { id: string; status: ApptStatus; keepDeposit?: boolean },
+  AppointmentRow
+>({
   action: "grooming.view",
-  async run(trx, ctx, { id, status }) {
+  async run(trx, ctx, { id, status, keepDeposit }) {
     const a = await trx
       .selectFrom("appointments")
-      .select(["status", "staff_id"])
+      .select(["status", "staff_id", "deposit_id"])
       .where("id", "=", id)
       .forUpdate()
       .executeTakeFirst();
@@ -940,6 +984,8 @@ export const setAppointmentStatus = defineHandler<{ id: string; status: ApptStat
         );
       throw err;
     }
+    if (status === "no_show" && a.deposit_id) await noShowDeposit(trx, ctx, a.deposit_id, keepDeposit);
+    if (a.status === "no_show" && a.deposit_id) await undoNoShowDeposit(trx, a.deposit_id);
     // Back-bar supplies come off when the groom is finished, and go back if that's undone.
     if (status === "ready" || status === "done") await useSupplies(trx, ctx, id);
     if (status === "ready") await readyText(trx, ctx, id);
@@ -948,12 +994,41 @@ export const setAppointmentStatus = defineHandler<{ id: string; status: ApptStat
   },
 });
 
-export const cancelAppointment = defineHandler<{ id: string }, void>({
+/** A paid deposit on a no-show: kept as a fee (the store's default) or refunded. */
+async function noShowDeposit(trx: Trx, ctx: Ctx, depositId: string, keep: boolean | undefined) {
+  const b = await trx
+    .selectFrom("businesses")
+    .select("deposit_no_show")
+    .where("id", "=", ctx.businessId)
+    .executeTakeFirstOrThrow();
+  const d = await trx.selectFrom("deposits").select("status").where("id", "=", depositId).executeTakeFirst();
+  if (d?.status === "pending") return void (await refundDeposit(trx, ctx, depositId, "no-show"));
+  if (d?.status !== "paid") return;
+  if (keep ?? b.deposit_no_show === "keep") await keepDeposit(trx, ctx, depositId, "No-show fee");
+  else await refundDeposit(trx, ctx, depositId, "no-show, refunded");
+}
+
+/** Undoing a no-show: a kept fee has to be refunded first, so the money isn't taken twice. */
+async function undoNoShowDeposit(trx: Trx, depositId: string) {
+  const d = await trx
+    .selectFrom("deposits as d")
+    .leftJoin("sales as s", "s.id", "d.kept_sale_id")
+    .select(["d.status", "s.receipt_number", "s.total_cents", "s.refunded_cents"])
+    .where("d.id", "=", depositId)
+    .executeTakeFirst();
+  if (d?.status === "kept" && (d.refunded_cents ?? 0) < (d.total_cents ?? 0))
+    throw new AppError(
+      "invalid",
+      `The deposit was kept as a no-show fee (receipt #${d.receipt_number}). Refund that sale first, then undo the no-show.`,
+    );
+}
+
+export const cancelAppointment = defineHandler<{ id: string; refundDeposit?: boolean }, void>({
   action: "grooming.book",
-  async run(trx, _ctx, { id }) {
+  async run(trx, ctx, { id, refundDeposit: giveBack }) {
     const a = await trx
       .selectFrom("appointments")
-      .select(["status"])
+      .select(["status", "deposit_id"])
       .where("id", "=", id)
       .forUpdate()
       .executeTakeFirst();
@@ -963,9 +1038,18 @@ export const cancelAppointment = defineHandler<{ id: string }, void>({
     if (a.status === "canceled") return;
     await trx
       .updateTable("appointments")
-      .set({ status: "canceled", canceled_at: new Date() })
+      .set({ status: "canceled", canceled_at: new Date(), hold_expires_at: null })
       .where("id", "=", id)
       .execute();
+    if (!a.deposit_id) return;
+    const d = await trx
+      .selectFrom("deposits")
+      .select("status")
+      .where("id", "=", a.deposit_id)
+      .executeTakeFirst();
+    if (d?.status === "paid" && giveBack === false)
+      await keepDeposit(trx, ctx, a.deposit_id, "Cancellation fee");
+    else await refundDeposit(trx, ctx, a.deposit_id, "canceled by the store");
   },
 });
 
@@ -986,16 +1070,23 @@ function startOfToday(): Date {
   return d;
 }
 
-/** For the customer delete: cancels their upcoming appointments (today on, not yet started). */
-export async function cancelUpcomingFor(trx: Trx, customerId: string): Promise<number> {
-  const res = await trx
+/** For the customer delete: cancels their upcoming appointments (today on, not yet started) and refunds deposits. */
+export async function cancelUpcomingFor(trx: Trx, ctx: Ctx, customerId: string): Promise<number> {
+  const rows = await trx
     .updateTable("appointments")
-    .set({ status: "canceled", canceled_at: new Date() })
+    .set({ status: "canceled", canceled_at: new Date(), hold_expires_at: null })
     .where("customer_id", "=", customerId)
     .where("starts_at", ">=", startOfToday())
-    .where("status", "in", ["booked", "checked_in"])
-    .executeTakeFirst();
-  return Number(res.numUpdatedRows);
+    .where("status", "in", ["held", "booked", "checked_in"])
+    .returning("id")
+    .execute();
+  await refundDepositsFor(
+    trx,
+    ctx,
+    rows.map((r) => r.id),
+    "customer deleted",
+  );
+  return rows.length;
 }
 
 export async function countUpcomingFor(trx: Trx, customerId: string): Promise<number> {
@@ -1024,7 +1115,7 @@ async function saveText(
   trx: Trx,
   ctx: Ctx,
   appointmentId: string,
-  kind: "ready" | "moved" | "canceled",
+  kind: "ready" | "moved" | "canceled" | "deposit",
   to: string,
   body: string,
 ) {
@@ -1068,7 +1159,7 @@ async function readyText(trx: Trx, ctx: Ctx, id: string) {
 
 export interface AppointmentMessage {
   id: string;
-  kind: "ready" | "moved" | "canceled";
+  kind: "ready" | "moved" | "canceled" | "deposit";
   to: string;
   body: string;
   status: "preview" | "queued" | "sent" | "failed";
@@ -1307,14 +1398,15 @@ export const applyCallout = defineHandler<
         out.left++;
         continue;
       }
-      if (a.status !== "booked" && a.status !== "checked_in")
+      if (a.status !== "held" && a.status !== "booked" && a.status !== "checked_in")
         throw new AppError("invalid", `${a.pet_name}'s groom has started, so it can't be changed here.`);
       if (c.action === "cancel") {
         await trx
           .updateTable("appointments")
-          .set({ status: "canceled", canceled_at: new Date() })
+          .set({ status: "canceled", canceled_at: new Date(), hold_expires_at: null })
           .where("id", "=", a.id)
           .execute();
+        await refundDepositsFor(trx, ctx, [a.id], "groomer called out");
         out.canceled++;
         log.push({ id: a.id, pet: a.pet_name, action: "cancel" });
         if (notify && a.phone) {

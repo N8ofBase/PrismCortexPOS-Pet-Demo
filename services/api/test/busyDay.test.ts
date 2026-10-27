@@ -265,8 +265,8 @@ describe("grooming revenue by groomer", () => {
     });
     await invoke(db, cashier, "payCash", {
       saleId: s.saleId,
-      amountCents: s.totalCents,
-      tenderedCents: s.totalCents,
+      amountCents: s.totalCents - s.depositCents,
+      tenderedCents: s.totalCents - s.depositCents,
     });
     await invoke(db, cashier, "setAppointmentStatus", { id: mo.id, status: "no_show" });
     const from = atLocal(todayIso(), 0).toISOString();

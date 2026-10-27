@@ -456,7 +456,7 @@ export const deleteCustomer = defineHandler<{ id: string }, void>({
   action: "customers.delete",
   async run(trx, ctx, { id }) {
     const p = await preview(trx, id);
-    await cancelUpcomingFor(trx, id);
+    await cancelUpcomingFor(trx, ctx, id);
     await trx.deleteFrom("customers").where("id", "=", id).execute();
     await audit(trx, ctx, {
       action: "customer.delete",

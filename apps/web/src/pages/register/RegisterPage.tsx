@@ -85,7 +85,12 @@ export function RegisterPage() {
         setTicket(
           addGroom(
             { ...base, customer },
-            { appointmentId: g.appointmentId, name: `${g.label} · ${g.petName}`, priceCents: g.priceCents },
+            {
+              appointmentId: g.appointmentId,
+              name: `${g.label} · ${g.petName}`,
+              priceCents: g.priceCents,
+              depositCents: g.depositCents,
+            },
           ),
         );
         toast("Groom added to the ticket. Add any retail items, then take payment.");
@@ -192,6 +197,10 @@ export function RegisterPage() {
     }
     const sale = await checkout.mutateAsync(next).catch(() => null);
     if (!sale) return;
+    if (sale.depositRefundedCents)
+      toast(
+        `The deposit was more than the sale: ${formatMoney(sale.depositRefundedCents)} refunded to the card that paid it`,
+      );
     if (sale.paid) return finish(sale.saleId, 0);
     setStage({ kind: "pay", sale, mode });
   }
@@ -432,6 +441,7 @@ function TicketView({
 }) {
   const { me } = useSession();
   const p = price.priced;
+  const depositCents = ticket.grooms.reduce((s, g) => s + (g.depositCents ?? 0), 0);
   const lineDiscounts = (key: string) => p?.discounts.filter((d) => d.lineKey === key) ?? [];
   const cards = ticket.customer?.card.punchCards ?? [];
   const programsOnTicket = new Map(
@@ -599,6 +609,18 @@ function TicketView({
             <span>Total</span>
             <span className="num">{formatMoney(p.totalCents)}</span>
           </div>
+          {depositCents > 0 && (
+            <>
+              <div>
+                <span>Deposit paid online</span>
+                <span className="num">−{formatMoney(Math.min(depositCents, p.totalCents))}</span>
+              </div>
+              <div>
+                <b>Due</b>
+                <b className="num">{formatMoney(Math.max(0, p.totalCents - depositCents))}</b>
+              </div>
+            </>
+          )}
         </div>
       )}
       {ticket.discounts.some((d) => d.lineKey !== null) && (

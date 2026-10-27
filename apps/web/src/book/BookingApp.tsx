@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Kysely } from "kysely";
-import { clockText, formatMoney, formatPhone, readableOn, shortDay } from "@pet-pos/core";
-import type { MyAppointment } from "@pet-pos/api";
+import { clockText, formatMoney, formatPhone, minutesOfDay, readableOn, shortDay } from "@pet-pos/core";
+import type { DepositView, MyAppointment } from "@pet-pos/api";
 import { demoBusinessId, type DB } from "@pet-pos/db";
 import { createDemoPublicApi } from "../api/client.ts";
 import { errorMessage } from "../ui/errors.ts";
@@ -10,6 +10,7 @@ import { StoreMark } from "../ui/StoreMark.tsx";
 import { TwoTapButton } from "../ui/TwoTapButton.tsx";
 import { BookFlow, type BookStart } from "./BookFlow.tsx";
 import { BookingContext, loadCustomer, saveCustomer, useBooking } from "./context.ts";
+import { goPay, payIdFromPath, PayPage } from "./PayPage.tsx";
 import { SignIn } from "./SignIn.tsx";
 
 /** The public booking page at /book: the customer's view of the store. */
@@ -28,6 +29,14 @@ function WithStore({ db, businessId }: { db: Kysely<DB>; businessId: string }) {
     [db, businessId],
   );
   const page = useQuery({ queryKey: ["bookingPage"], queryFn: () => api.call("bookingPage") });
+  // The payment page (simulated Square in the demo) lives at /book/pay/<deposit id>.
+  const [payId, setPayId] = useState(() => payIdFromPath(location.pathname));
+  const [returned, setReturned] = useState<DepositView | null>(null);
+  useEffect(() => {
+    const sync = () => setPayId(payIdFromPath(location.pathname));
+    addEventListener("popstate", sync);
+    return () => removeEventListener("popstate", sync);
+  }, []);
 
   if (page.isPending) return <Center>Opening the booking page…</Center>;
   if (page.isError) return <Center>{errorMessage(page.error)}</Center>;
@@ -84,7 +93,25 @@ function WithStore({ db, businessId }: { db: Kysely<DB>; businessId: string }) {
           ) : (
             <>
               {p.message && <p className="muted">{p.message}</p>}
-              {customer ? <Account /> : <SignIn />}
+              {!customer ? (
+                <SignIn />
+              ) : payId ? (
+                <PayPage
+                  id={payId}
+                  onDone={(v) => {
+                    history.pushState(null, "", "/book");
+                    setPayId(null);
+                    setReturned(v);
+                    void qc.invalidateQueries({ queryKey: ["myAccount"] });
+                  }}
+                />
+              ) : (
+                <Account
+                  returned={returned}
+                  onPay={(url) => setPayId(goPay(url))}
+                  clearReturned={() => setReturned(null)}
+                />
+              )}
               {p.phone && <p className="muted small">Questions? Call us at {formatPhone(p.phone)}.</p>}
             </>
           )}
@@ -96,7 +123,18 @@ function WithStore({ db, businessId }: { db: Kysely<DB>; businessId: string }) {
 
 type Tab = "book" | "mine" | "pets";
 
-function Account() {
+/** "10:15 AM" for a hold's end. */
+export const holdTime = (d: Date | string) => clockText(minutesOfDay(new Date(d)));
+
+function Account({
+  returned,
+  onPay,
+  clearReturned,
+}: {
+  returned: DepositView | null;
+  onPay: (url: string) => void;
+  clearReturned: () => void;
+}) {
   const { api, name, signOut } = useBooking();
   const [tab, setTab] = useState<Tab>("book");
   const [start, setStart] = useState<BookStart | undefined>();
@@ -131,6 +169,7 @@ function Account() {
             setTab("book");
             setBooked(null);
             setMoving(null);
+            clearReturned();
           }}
         >
           Book
@@ -143,6 +182,20 @@ function Account() {
         </button>
       </div>
 
+      {tab === "book" && returned && (
+        <DepositReturn
+          v={returned}
+          onPay={onPay}
+          onMine={() => {
+            clearReturned();
+            setTab("mine");
+          }}
+          onAgain={() => {
+            clearReturned();
+            setStart(undefined);
+          }}
+        />
+      )}
       {tab === "book" && booked && (
         <section className="panel" role="status" style={{ display: "grid", gap: 6 }}>
           <h2 style={{ margin: 0 }}>You're booked!</h2>
@@ -168,8 +221,14 @@ function Account() {
           </div>
         </section>
       )}
-      {tab === "book" && !booked && (
-        <BookFlow key={JSON.stringify(start ?? {})} pets={a.pets} start={start} onDone={setBooked} />
+      {tab === "book" && !booked && !returned && (
+        <BookFlow
+          key={JSON.stringify(start ?? {})}
+          pets={a.pets}
+          start={start}
+          newCustomer={a.newCustomer}
+          onDone={(x) => (x.status === "held" && x.deposit?.url ? onPay(x.deposit.url) : setBooked(x))}
+        />
       )}
 
       {tab === "mine" && moving && (
@@ -189,6 +248,7 @@ function Account() {
           upcoming={a.upcoming}
           recent={a.recent}
           onMove={setMoving}
+          onPay={onPay}
           onAgain={(x) => {
             setStart({ petId: x.petId ?? undefined, serviceId: x.serviceId, addonIds: x.addonIds });
             setBooked(null);
@@ -205,11 +265,13 @@ function MyAppointments({
   upcoming,
   recent,
   onMove,
+  onPay,
   onAgain,
 }: {
   upcoming: MyAppointment[];
   recent: MyAppointment[];
   onMove: (a: MyAppointment) => void;
+  onPay: (url: string) => void;
   onAgain: (a: MyAppointment) => void;
 }) {
   const { api, page } = useBooking();
@@ -232,7 +294,32 @@ function MyAppointments({
           <span>
             <b>{a.petName}</b> · {a.label} · {a.groomerName} · {formatMoney(a.priceCents)}
           </span>
-          {a.canChange ? (
+          {a.deposit?.status === "paid" && (
+            <span className="muted small">
+              {formatMoney(a.deposit.amountCents)} deposit paid. It comes off at pickup.
+            </span>
+          )}
+          {a.status === "held" ? (
+            <>
+              <span className="note small">
+                Waiting for your {formatMoney(a.deposit?.amountCents ?? 0)} deposit. Your time is held until{" "}
+                {a.holdUntil ? holdTime(a.holdUntil) : "soon"}.
+              </span>
+              <div className="actions">
+                {a.deposit?.url && (
+                  <button type="button" className="primary" onClick={() => onPay(a.deposit!.url!)}>
+                    Pay deposit
+                  </button>
+                )}
+                <TwoTapButton
+                  className="dangerbtn"
+                  label="Cancel booking"
+                  confirmLabel="Tap again to cancel"
+                  onConfirm={() => cancel.mutate(a.id)}
+                />
+              </div>
+            </>
+          ) : a.canChange ? (
             <div className="actions">
               <button type="button" onClick={() => onMove(a)}>
                 Reschedule
@@ -273,6 +360,85 @@ function MyAppointments({
         </>
       )}
     </div>
+  );
+}
+
+/** Back from the payment page: booked, still held, or refunded because the hold ran out. */
+function DepositReturn({
+  v,
+  onPay,
+  onMine,
+  onAgain,
+}: {
+  v: DepositView;
+  onPay: (url: string) => void;
+  onMine: () => void;
+  onAgain: () => void;
+}) {
+  const { api } = useBooking();
+  const qc = useQueryClient();
+  const cancel = useMutation({
+    mutationFn: () => api.call("cancelMine", { id: v.appointmentId }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["myAccount"] });
+      onAgain();
+    },
+  });
+  if (v.status === "paid")
+    return (
+      <section className="panel" role="status" style={{ display: "grid", gap: 6 }}>
+        <h2 style={{ margin: 0 }}>You're booked!</h2>
+        <p style={{ margin: 0 }}>
+          {v.description}
+          <br />
+          {formatMoney(v.amountCents)} deposit paid. It comes off the {formatMoney(v.priceCents)} at pickup.
+        </p>
+        <div className="actions">
+          <button type="button" onClick={onMine}>
+            See my appointments
+          </button>
+          <button type="button" onClick={onAgain}>
+            Book another
+          </button>
+        </div>
+      </section>
+    );
+  if (v.holdUntil && v.url)
+    return (
+      <section className="panel" role="status" style={{ display: "grid", gap: 8 }}>
+        <h2 style={{ margin: 0 }}>Your time is held until {holdTime(v.holdUntil)}</h2>
+        <p style={{ margin: 0 }}>
+          {v.description}. Pay the {formatMoney(v.amountCents)} deposit to finish booking.
+        </p>
+        {v.message && (
+          <p className="muted small" style={{ margin: 0 }}>
+            {v.message}
+          </p>
+        )}
+        <div className="actions">
+          <button type="button" className="primary" onClick={() => onPay(v.url!)}>
+            Pay deposit
+          </button>
+          <TwoTapButton
+            className="dangerbtn"
+            label="Cancel booking"
+            confirmLabel="Tap again to cancel"
+            onConfirm={() => cancel.mutate()}
+          />
+        </div>
+      </section>
+    );
+  return (
+    <section className="panel" role="status" style={{ display: "grid", gap: 8 }}>
+      <p className="error-box" style={{ margin: 0 }}>
+        {v.message ?? "The hold on this time ran out. Please book again."}
+      </p>
+      <div className="actions">
+        <button type="button" onClick={onAgain}>
+          Book again
+        </button>
+      </div>
+    </section>
   );
 }
 

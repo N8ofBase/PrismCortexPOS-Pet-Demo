@@ -98,3 +98,31 @@ export function normalizeContact(input: string): { kind: "phone" | "email"; valu
   if (d.length === 11 && d.startsWith("1")) d = d.slice(1);
   return d.length === 10 ? { kind: "phone", value: d } : null;
 }
+
+export type DepositRule = "off" | "all" | "new";
+
+/**
+ * The deposit an online booking asks for, in cents (0 for none). The service's deposit,
+ * when the store's rule applies to this customer, never more than the groom's quote.
+ */
+export function bookingDeposit(v: {
+  rule: DepositRule;
+  serviceDepositCents: number;
+  quoteCents: number;
+  isNewCustomer: boolean;
+}): number {
+  if (v.rule === "off" || (v.rule === "new" && !v.isNewCustomer)) return 0;
+  return Math.max(0, Math.min(v.serviceDepositCents, v.quoteCents));
+}
+
+/** How much of a paid deposit goes toward a sale, and what's left over to refund. */
+export function applyDeposit(
+  saleTotalCents: number,
+  depositCents: number,
+): { appliedCents: number; refundCents: number } {
+  const applied = Math.max(0, Math.min(saleTotalCents, depositCents));
+  return { appliedCents: applied, refundCents: depositCents - applied };
+}
+
+/** Minutes an unpaid online booking holds its time. */
+export const HOLD_MINUTES = [10, 15, 30] as const;

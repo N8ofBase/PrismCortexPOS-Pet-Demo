@@ -18,8 +18,9 @@ import {
 } from "@pet-pos/core";
 import type { DB } from "@pet-pos/db";
 import { defineHandler } from "../handler.ts";
+import { applyDepositsToSale, restoreDeposits } from "../deposits.ts";
 import { terminal } from "../payments/terminal.ts";
-import { audit, currentLocationId, likePattern, requireInt } from "../shared.ts";
+import { audit, currentLocationId, likePattern, nextReceiptNumber, requireInt } from "../shared.ts";
 import { toCards, CUSTOMER_COLUMNS, type CustomerCard } from "./customers.ts";
 import { productQuery, type ProductRow } from "./inventory.ts";
 import { useSupplies } from "./supplies.ts";
@@ -277,18 +278,6 @@ async function loadGrooms(trx: Trx, ctx: Ctx, t: TicketInput) {
   return out;
 }
 
-async function nextReceiptNumber(trx: Trx, businessId: string): Promise<number> {
-  const row = await trx
-    .insertInto("business_counters")
-    .values({ business_id: businessId, name: "receipt", value: 1001 })
-    .onConflict((oc) =>
-      oc.columns(["business_id", "name"]).doUpdateSet({ value: sql`business_counters.value + 1` }),
-    )
-    .returning("value")
-    .executeTakeFirstOrThrow();
-  return row.value;
-}
-
 export interface CheckoutResult {
   saleId: string;
   receiptNumber: number;
@@ -298,6 +287,10 @@ export interface CheckoutResult {
   totalCents: number;
   /** A cash-only discount is on the sale: card payments are refused. */
   cashOnly: boolean;
+  /** Deposits paid online for grooms on the sale, already counted as paid. */
+  depositCents: number;
+  /** The part of a deposit the sale didn't need, refunded to the card that paid it. */
+  depositRefundedCents: number;
   paid: boolean;
 }
 
@@ -394,7 +387,14 @@ export const startCheckout = defineHandler<TicketInput, CheckoutResult>({
 
     const cashOnly = L.applied.some((a) => L.rules.get(a.rule.id)?.cashOnly);
     let paid = false;
-    if (p.totalCents === 0) paid = await finishSale(trx, ctx, sale.id);
+    const dep = await applyDepositsToSale(
+      trx,
+      ctx,
+      sale.id,
+      [...L.grooms.values()].map((g) => g.id),
+      p.totalCents,
+    );
+    if (p.totalCents === 0 || dep.appliedCents >= p.totalCents) paid = await finishSale(trx, ctx, sale.id);
     return {
       saleId: sale.id,
       receiptNumber,
@@ -403,6 +403,8 @@ export const startCheckout = defineHandler<TicketInput, CheckoutResult>({
       taxCents: p.taxCents,
       totalCents: p.totalCents,
       cashOnly,
+      depositCents: dep.appliedCents,
+      depositRefundedCents: dep.refundedCents,
       paid,
     };
   },
@@ -741,6 +743,8 @@ export const cancelSale = defineHandler<{ saleId: string; reason?: string }, { r
   action: "register.use",
   async run(trx, ctx, { saleId, reason }) {
     const sale = await openSale(trx, saleId);
+    // Deposits aren't handed back: they go back to their grooms for next time.
+    await restoreDeposits(trx, saleId);
     const payments = await trx.selectFrom("payments").selectAll().where("sale_id", "=", saleId).execute();
     let refunded = 0;
     for (const p of payments) {
@@ -971,6 +975,8 @@ export interface SalesDay {
   /** Grooming sales by groomer, part of the total above. */
   grooming: GroomerTotals[];
   noShows: number;
+  /** Online deposits: taken through Square, used at the register, kept as fees, refunded. */
+  deposits: { takenCents: number; usedCents: number; keptCents: number; refundedCents: number };
 }
 
 /**
@@ -1025,6 +1031,12 @@ export const listSales = defineHandler<{ from: string; to: string; q?: string },
       refundCents: t.refundCents,
       grooming: g.groomers,
       noShows: g.noShows,
+      deposits: {
+        takenCents: t.depositsTakenCents,
+        usedCents: t.depositsUsedCents,
+        keptCents: t.depositsKeptCents,
+        refundedCents: t.depositsRefundedCents,
+      },
     };
   },
 });

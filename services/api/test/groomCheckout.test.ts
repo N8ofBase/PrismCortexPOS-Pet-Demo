@@ -51,8 +51,9 @@ const pay = async (t: TicketInput) => {
   const s = await invoke(db, cashier, "startCheckout", t);
   await invoke(db, cashier, "payCash", {
     saleId: s.saleId,
-    amountCents: s.totalCents,
-    tenderedCents: s.totalCents,
+    // Biscuit's demo groom has a $20.00 deposit paid online, already taken off.
+    amountCents: s.totalCents - s.depositCents,
+    tenderedCents: s.totalCents - s.depositCents,
   });
   return s;
 };

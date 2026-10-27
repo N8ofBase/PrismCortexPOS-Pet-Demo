@@ -6,6 +6,7 @@ import {
   clockText,
   formatMoney,
   formatPhone,
+  minutesOfDay,
   minutesToTime,
   nextSteps,
   timeToMinutes,
@@ -27,7 +28,8 @@ export function useStatus() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (v: { id: string; status: ApptStatus }) => api.call("setAppointmentStatus", v),
+    mutationFn: (v: { id: string; status: ApptStatus; keepDeposit?: boolean }) =>
+      api.call("setAppointmentStatus", v),
     onSuccess: (a) => {
       toast(
         a.status === "ready" && a.customerPhone
@@ -40,6 +42,7 @@ export function useStatus() {
       void qc.invalidateQueries({ queryKey: ["groomingWeek"] });
       void qc.invalidateQueries({ queryKey: ["appointmentMessages", a.id] });
       void qc.invalidateQueries({ queryKey: ["customerAppointments"] });
+      void qc.invalidateQueries({ queryKey: ["sales"] });
     },
     onError: (err) => toast(errorMessage(err)),
   });
@@ -84,10 +87,20 @@ export function AppointmentPanel({
   const role = me.staff.role;
   const canBook = can(role, "grooming.book");
   const steps = nextSteps(a.status, role);
+  const paidDeposit = a.deposit?.status === "paid" ? a.deposit.amountCents - a.deposit.refundedCents : 0;
+  const [refundOnCancel, setRefundOnCancel] = useState(true);
+  const [noShow, setNoShow] = useState<{ keep: boolean } | null>(null);
   const cancel = useMutation({
-    mutationFn: () => api.call("cancelAppointment", { id: a.id }),
+    mutationFn: () =>
+      api.call("cancelAppointment", { id: a.id, ...(paidDeposit ? { refundDeposit: refundOnCancel } : {}) }),
     onSuccess: () => {
-      toast("Appointment canceled");
+      toast(
+        paidDeposit
+          ? refundOnCancel
+            ? `Appointment canceled · ${formatMoney(paidDeposit)} deposit refunded`
+            : `Appointment canceled · ${formatMoney(paidDeposit)} deposit kept as a cancellation fee`
+          : "Appointment canceled",
+      );
       void qc.invalidateQueries({ queryKey: ["groomingDay"] });
       void qc.invalidateQueries({ queryKey: ["customerAppointments"] });
       onClose();
@@ -144,7 +157,11 @@ export function AppointmentPanel({
               key={s.to}
               className={s.undo ? "" : "primary"}
               disabled={status.isPending}
-              onClick={() => status.mutate({ id: a.id, status: s.to })}
+              onClick={() =>
+                s.to === "no_show" && paidDeposit
+                  ? setNoShow({ keep: me.business.keepDepositOnNoShow })
+                  : status.mutate({ id: a.id, status: s.to })
+              }
             >
               {s.label}
             </button>
@@ -174,6 +191,16 @@ export function AppointmentPanel({
               Move
             </button>
           )}
+          {canBook && a.status !== "done" && a.status !== "canceled" && paidDeposit > 0 && (
+            <label className="check small">
+              <input
+                type="checkbox"
+                checked={refundOnCancel}
+                onChange={(e) => setRefundOnCancel(e.target.checked)}
+              />
+              If canceled, refund the {formatMoney(paidDeposit)} deposit
+            </label>
+          )}
           {canBook && a.status !== "done" && a.status !== "canceled" && (
             <TwoTapButton
               className="dangerbtn"
@@ -184,6 +211,42 @@ export function AppointmentPanel({
             />
           )}
         </div>
+        {noShow && (
+          <div className="note" role="alert" style={{ display: "grid", gap: 8 }}>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={noShow.keep}
+                onChange={(e) => setNoShow({ keep: e.target.checked })}
+              />
+              Keep the {formatMoney(paidDeposit)} deposit as a no-show fee
+            </label>
+            <span className="muted small">
+              {noShow.keep
+                ? "It's rung up as a paid sale, so it shows in today's sales with a receipt number."
+                : "It goes back to the card that paid it."}
+            </span>
+            <div className="actions">
+              <button
+                type="button"
+                className="primary"
+                disabled={status.isPending}
+                onClick={() =>
+                  status.mutate(
+                    { id: a.id, status: "no_show", keepDeposit: noShow.keep },
+                    { onSuccess: () => setNoShow(null) },
+                  )
+                }
+              >
+                Mark no-show
+              </button>
+              <button type="button" onClick={() => setNoShow(null)}>
+                Never mind
+              </button>
+            </div>
+          </div>
+        )}
+        <DepositLine a={a} canBook={canBook && open} />
         {a.status === "done" && (
           <p style={{ margin: 0 }}>
             {a.receiptNumber ? `Paid · receipt #${a.receiptNumber}` : "Done (paid outside the register)"}
@@ -197,6 +260,107 @@ export function AppointmentPanel({
         <AppointmentNotes appointmentId={a.id} />
       </div>
     </SlideOver>
+  );
+}
+
+const holdTime = (d: Date) => clockText(minutesOfDay(new Date(d)));
+
+/** The deposit on this groom, and asking for or refunding one. */
+function DepositLine({ a, canBook }: { a: AppointmentRow; canBook: boolean }) {
+  const { api, me } = useSession();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [asked, setAsked] = useState<string | null>(null);
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["groomingDay"] });
+    void qc.invalidateQueries({ queryKey: ["groomingWeek"] });
+    void qc.invalidateQueries({ queryKey: ["appointmentMessages", a.id] });
+  };
+  const ask = useMutation({
+    mutationFn: (text: boolean) => api.call("requestDeposit", { appointmentId: a.id, text }),
+    onSuccess: (r) => {
+      setAsked(r.url);
+      toast(r.texted ? "Deposit link texted (a preview in the demo)" : "Deposit link made");
+      refresh();
+    },
+    onError: (err) => toast(errorMessage(err)),
+  });
+  const refund = useMutation({
+    mutationFn: () => api.call("refundDeposit", { id: a.deposit!.id }),
+    onSuccess: (r) => {
+      toast(r.refundedCents ? `${formatMoney(r.refundedCents)} deposit refunded` : "Deposit link canceled");
+      refresh();
+    },
+    onError: (err) => toast(errorMessage(err)),
+  });
+  const d = a.deposit;
+  const amount = d ? formatMoney(d.amountCents - (d.status === "applied" ? 0 : d.refundedCents)) : "";
+  const paidOn = d?.paidAt
+    ? new Date(d.paidAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : "";
+  const canRefund = can(me.staff.role, "sales.refund");
+
+  if (!d || d.status === "canceled" || d.status === "expired") {
+    if (!canBook || (a.status !== "booked" && a.status !== "checked_in")) return null;
+    return (
+      <div className="actions" style={{ alignItems: "center" }}>
+        <button type="button" disabled={ask.isPending} onClick={() => ask.mutate(false)}>
+          Ask for a deposit
+        </button>
+        {a.customerPhone && (
+          <button type="button" disabled={ask.isPending} onClick={() => ask.mutate(true)}>
+            Ask for a deposit and text the link
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "grid", gap: 4 }} aria-label="Deposit">
+      {d.status === "pending" && a.status === "held" && (
+        <span className="note small">
+          Waiting for the {formatMoney(d.amountCents)} deposit. The time is held until{" "}
+          {a.holdUntil ? holdTime(a.holdUntil) : "soon"}, then let go.
+        </span>
+      )}
+      {d.status === "pending" && a.status !== "held" && (
+        <span className="small">
+          {formatMoney(d.amountCents)} deposit asked for, not paid yet.
+          {(asked ?? d.url) && (
+            <>
+              {" "}
+              Link: <span className="mono">{asked ?? d.url}</span>
+            </>
+          )}
+        </span>
+      )}
+      {d.status === "paid" && (
+        <span className="small">
+          <span className="tag ok">Deposit</span> {amount} paid online {paidOn}. It comes off at the register.
+        </span>
+      )}
+      {d.status === "applied" && <span className="small">{amount} deposit used on the sale.</span>}
+      {d.status === "refunded" && (
+        <span className="muted small">{formatMoney(d.refundedCents)} deposit refunded.</span>
+      )}
+      {d.status === "kept" && (
+        <span className="small">
+          {amount} deposit kept as a fee{d.keptReceiptNumber ? ` · receipt #${d.keptReceiptNumber}` : ""}.
+        </span>
+      )}
+      {canRefund && (d.status === "paid" || (d.status === "pending" && a.status !== "held")) && (
+        <div>
+          <TwoTapButton
+            label={d.status === "paid" ? "Refund deposit" : "Cancel deposit link"}
+            confirmLabel={
+              d.status === "paid" ? `Tap again: refund ${amount}` : "Tap again to cancel the link"
+            }
+            disabled={refund.isPending}
+            onConfirm={() => refund.mutate()}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -268,7 +432,12 @@ function MoveForm({ a, onDone }: { a: AppointmentRow; onDone: () => void }) {
   );
 }
 
-const KIND_LABEL = { ready: "Ready text", moved: "Change text", canceled: "Canceled text" } as const;
+const KIND_LABEL = {
+  ready: "Ready text",
+  moved: "Change text",
+  canceled: "Canceled text",
+  deposit: "Deposit link",
+} as const;
 
 /** Texts to the customer about this appointment, previews in the demo. */
 function Messages({ a, canText }: { a: AppointmentRow; canText: boolean }) {

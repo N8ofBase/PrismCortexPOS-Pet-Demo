@@ -466,6 +466,13 @@ function DayGrid({
                     <b>{a.petName}</b> <span className="muted">{clockText(a.start)}</span>
                     {a.rabiesLapsed && <span title="Rabies expired"> ⚠</span>}
                     {a.source === "online" && <span className="tag astro"> Online</span>}
+                    {a.deposit?.status === "paid" && (
+                      <span className="tag ok" title="Deposit paid online">
+                        {" "}
+                        $
+                      </span>
+                    )}
+                    {a.status === "held" && <span className="muted"> · Waiting for deposit</span>}
                     <br />
                     {a.serviceName} · {a.size}
                     {h > 60 && (

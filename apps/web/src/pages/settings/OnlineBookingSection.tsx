@@ -20,6 +20,9 @@ export function OnlineBookingSection({ s, canEdit }: { s: StoreSettings; canEdit
     stepMinutes: b.stepMinutes,
     message: b.message ?? "",
     phone: formatPhone(b.phone),
+    depositRule: b.depositRule,
+    holdMinutes: b.holdMinutes,
+    noShow: b.noShow,
   });
 
   const save = useMutation({
@@ -39,6 +42,9 @@ export function OnlineBookingSection({ s, canEdit }: { s: StoreSettings; canEdit
           stepMinutes: f.stepMinutes,
           message: f.message,
           phone: f.phone,
+          depositRule: f.depositRule,
+          holdMinutes: f.holdMinutes,
+          noShow: f.noShow,
         },
       }),
     onSuccess: () => {
@@ -120,6 +126,44 @@ export function OnlineBookingSection({ s, canEdit }: { s: StoreSettings; canEdit
               />
             </label>
           </div>
+          <div className="form">
+            <label>
+              Deposits
+              <select
+                value={f.depositRule}
+                onChange={(e) => setF({ ...f, depositRule: e.target.value as typeof f.depositRule })}
+              >
+                <option value="off">Off</option>
+                <option value="all">Every online booking with a deposit</option>
+                <option value="new">New customers only</option>
+              </select>
+            </label>
+            <label>
+              Hold an unpaid booking for
+              <select
+                value={f.holdMinutes}
+                onChange={(e) => setF({ ...f, holdMinutes: Number(e.target.value) as 10 | 15 | 30 })}
+              >
+                <option value={10}>10 minutes</option>
+                <option value={15}>15 minutes</option>
+                <option value={30}>30 minutes</option>
+              </select>
+            </label>
+            <label>
+              On a no-show
+              <select
+                value={f.noShow}
+                onChange={(e) => setF({ ...f, noShow: e.target.value as "keep" | "refund" })}
+              >
+                <option value="keep">Keep the deposit</option>
+                <option value="refund">Refund it</option>
+              </select>
+            </label>
+          </div>
+          <p className="muted small" style={{ margin: 0 }}>
+            The amount is the deposit set on each service. It comes off the groom at the register and is
+            refunded when a customer cancels before the cutoff.
+          </p>
           <label>
             Welcome message on the booking page
             <input

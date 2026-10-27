@@ -1,4 +1,4 @@
-import type { Transaction } from "kysely";
+import { sql, type Transaction } from "kysely";
 import { AppError, type Ctx } from "@pet-pos/core";
 import type { DB } from "@pet-pos/db";
 
@@ -49,4 +49,17 @@ export function requireInt(
     throw new AppError("invalid", `${field} must be a whole number from ${min} to ${max}.`);
   }
   return value;
+}
+
+/** The next receipt number for the business (sales and kept deposits share it). */
+export async function nextReceiptNumber(trx: Transaction<DB>, businessId: string): Promise<number> {
+  const row = await trx
+    .insertInto("business_counters")
+    .values({ business_id: businessId, name: "receipt", value: 1001 })
+    .onConflict((oc) =>
+      oc.columns(["business_id", "name"]).doUpdateSet({ value: sql`business_counters.value + 1` }),
+    )
+    .returning("value")
+    .executeTakeFirstOrThrow();
+  return row.value;
 }

@@ -20,6 +20,14 @@ export interface MoneyTotals {
   refundCents: number;
   /** gross − refunds. */
   netCents: number;
+  /** Deposits paid online in the range: card money through Square, not the drawer or the counter reader. */
+  depositsTakenCents: number;
+  /** Deposits used on grooms paid at the register in the range. */
+  depositsUsedCents: number;
+  /** Deposits kept as no-show or cancellation fees in the range (part of gross sales). */
+  depositsKeptCents: number;
+  /** Deposits given back in the range: canceled grooms, and the part a sale didn't need. */
+  depositsRefundedCents: number;
 }
 
 export async function moneyTotals(trx: Transaction<DB>, from: Date, to: Date): Promise<MoneyTotals> {
@@ -72,6 +80,31 @@ export async function moneyTotals(trx: Transaction<DB>, from: Date, to: Date): P
     .where("created_at", ">=", from)
     .where("created_at", "<", to)
     .executeTakeFirstOrThrow();
+  const deposits = await trx
+    .selectFrom("deposits")
+    .select([
+      sql<number>`coalesce(sum(amount_cents) FILTER (WHERE paid_at >= ${from} AND paid_at < ${to}), 0)::int`.as(
+        "taken",
+      ),
+      sql<number>`coalesce(sum(refunded_cents) FILTER (WHERE refunded_at >= ${from} AND refunded_at < ${to}), 0)::int`.as(
+        "back",
+      ),
+    ])
+    .executeTakeFirstOrThrow();
+  const used = await trx
+    .selectFrom("payments as p")
+    .innerJoin("deposits as d", "d.id", "p.deposit_id")
+    .select([
+      sql<number>`coalesce(sum(p.amount_cents) FILTER (WHERE d.kept_sale_id IS DISTINCT FROM p.sale_id), 0)::int`.as(
+        "used",
+      ),
+      sql<number>`coalesce(sum(p.amount_cents) FILTER (WHERE d.kept_sale_id = p.sale_id), 0)::int`.as("kept"),
+    ])
+    .where("p.method", "=", "deposit")
+    .where("p.status", "=", "completed")
+    .where("p.completed_at", ">=", from)
+    .where("p.completed_at", "<", to)
+    .executeTakeFirstOrThrow();
   const by = (rows: { method: string; n: number }[], m: "card" | "cash") =>
     rows.find((r) => r.method === m)?.n ?? 0;
   return {
@@ -87,6 +120,10 @@ export async function moneyTotals(trx: Transaction<DB>, from: Date, to: Date): P
     refundCount: refunds.n,
     refundCents: refunds.cents,
     netCents: sales.gross - refunds.cents,
+    depositsTakenCents: deposits.taken,
+    depositsUsedCents: used.used,
+    depositsKeptCents: used.kept,
+    depositsRefundedCents: deposits.back,
   };
 }
 

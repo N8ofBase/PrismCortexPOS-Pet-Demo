@@ -24,7 +24,9 @@ export function PaymentPanel({
   const { api } = useSession();
   const toast = useToast();
   const [mode, setMode] = useState<PayMode>(initialMode);
-  const [paidCents, setPaidCents] = useState(0);
+  // A deposit paid online counts as paid from the start.
+  const [paidCents, setPaidCents] = useState(sale.depositCents);
+  const handBack = paidCents - sale.depositCents;
   const [pendingCard, setPendingCard] = useState<{ paymentId: string; amountCents: number } | null>(null);
   const [declined, setDeclined] = useState<string | null>(null);
   const remaining = sale.totalCents - paidCents;
@@ -54,12 +56,20 @@ export function PaymentPanel({
           <span>Total</span>
           <span className="num">{formatMoney(sale.totalCents)}</span>
         </div>
+        {sale.depositCents > 0 && (
+          <div>
+            <span>Deposit paid online</span>
+            <span className="num">−{formatMoney(sale.depositCents)}</span>
+          </div>
+        )}
         {paidCents > 0 && (
           <>
-            <div>
-              <span>Paid</span>
-              <span className="num">{formatMoney(paidCents)}</span>
-            </div>
+            {handBack > 0 && (
+              <div>
+                <span>Paid</span>
+                <span className="num">{formatMoney(handBack)}</span>
+              </div>
+            )}
             <div>
               <b>Left to pay</b>
               <b className="num">{formatMoney(remaining)}</b>
@@ -116,20 +126,20 @@ export function PaymentPanel({
           )}
           {mode !== "card" && !sale.cashOnly && (
             <button type="button" onClick={() => setMode("card")}>
-              {paidCents ? "Rest by card" : "Pay by card instead"}
+              {handBack ? "Rest by card" : "Pay by card instead"}
             </button>
           )}
-          {mode !== "split" && !sale.cashOnly && paidCents === 0 && (
+          {mode !== "split" && !sale.cashOnly && handBack === 0 && (
             <button type="button" onClick={() => setMode("split")}>
               Split cash and card
             </button>
           )}
           <span style={{ marginLeft: "auto" }}>
-            {paidCents > 0 ? (
+            {handBack > 0 ? (
               <TwoTapButton
                 className="danger"
                 label="Cancel sale"
-                confirmLabel={`Tap again: hand back ${formatMoney(paidCents)}`}
+                confirmLabel={`Tap again: hand back ${formatMoney(handBack)}`}
                 onConfirm={() => cancel.mutate()}
               />
             ) : (

@@ -35,6 +35,7 @@ export type {
 export type { CustomerHistory, HistoryOrder } from "./handlers/history.ts";
 export type {
   AppointmentMessage,
+  AppointmentDeposit,
   AppointmentRow,
   BookingCheck,
   CalloutChange,
@@ -95,6 +96,8 @@ export {
 } from "./public/registry.ts";
 export type {
   BookingPage,
+  DepositView,
+  MyDeposit,
   CodeSent,
   MyAccount,
   MyAppointment,
@@ -102,3 +105,4 @@ export type {
   OpenDay,
   VerifyResult,
 } from "./public/booking.ts";
+export type { DepositRequest } from "./handlers/deposits.ts";

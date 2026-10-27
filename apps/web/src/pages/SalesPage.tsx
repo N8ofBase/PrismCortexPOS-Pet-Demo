@@ -117,6 +117,7 @@ export function SalesPage() {
           <Kpi label="Astro discounts" value={formatMoney(list.data.astroDiscountCents)} />
         </div>
       )}
+      {list.data && <DepositsLine d={list.data.deposits} />}
       {list.data && <GroomingTable grooming={list.data.grooming} noShows={list.data.noShows} />}
       <div className="tablewrap">
         <table className="wide">
@@ -297,5 +298,21 @@ export function GroomingTable({ grooming, noShows }: { grooming: GroomerTotals[]
         {noShows ? ` ${noShows} no-show${noShows === 1 ? "" : "s"} on this day.` : ""}
       </p>
     </section>
+  );
+}
+
+/** Online deposits for the range: card money through Square, kept apart from the counter card and the drawer. */
+function DepositsLine({
+  d,
+}: {
+  d: { takenCents: number; usedCents: number; keptCents: number; refundedCents: number };
+}) {
+  if (!d.takenCents && !d.usedCents && !d.keptCents && !d.refundedCents) return null;
+  return (
+    <p className="muted small" aria-label="Online deposits">
+      Online deposits taken {formatMoney(d.takenCents)} · used at the register {formatMoney(d.usedCents)} ·
+      kept as no-show or cancellation fees {formatMoney(d.keptCents)} · refunded{" "}
+      {formatMoney(d.refundedCents)}. They come through Square, not the counter card reader or the drawer.
+    </p>
   );
 }

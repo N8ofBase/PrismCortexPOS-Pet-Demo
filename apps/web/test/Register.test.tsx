@@ -118,6 +118,8 @@ const sale: CheckoutResult = {
   taxCents: 91,
   totalCents: 1390,
   cashOnly: false,
+  depositCents: 0,
+  depositRefundedCents: 0,
   paid: false,
 };
 

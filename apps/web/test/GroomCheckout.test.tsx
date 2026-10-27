@@ -49,6 +49,7 @@ describe("grooms waiting at the register", () => {
         status: "ready",
         priceCents: 7000,
         groomerName: "A",
+        depositCents: 0,
       },
       {
         appointmentId: "a2",
@@ -57,6 +58,7 @@ describe("grooms waiting at the register", () => {
         status: "in_progress",
         priceCents: 6000,
         groomerName: "B",
+        depositCents: 0,
       },
     ];
     const onAdd = vi.fn();
@@ -70,6 +72,7 @@ describe("grooms waiting at the register", () => {
       appointmentId: "a1",
       name: "Full groom · Biscuit",
       priceCents: 7000,
+      depositCents: 0,
     });
   });
 });

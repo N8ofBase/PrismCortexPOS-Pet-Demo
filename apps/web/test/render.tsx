@@ -22,6 +22,7 @@ export function meFor(role: Role): Me {
       astroDiscountsBeforeTax: true,
       groomingTaxable: false,
       textWhenReady: true,
+      keepDepositOnNoShow: true,
     },
     location: { id: "l1", name: "Main store (DEMO)", taxRateMpct: 7000 },
   };

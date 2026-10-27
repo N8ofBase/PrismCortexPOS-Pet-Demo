@@ -244,7 +244,12 @@ describe("deleteCustomer", () => {
     await expect(invoke(db, owner, "getCustomer", { id: sample!.id })).rejects.toThrow(/doesn't exist/);
 
     const log = await withBusiness(db, owner.businessId, (trx) =>
-      trx.selectFrom("audit_log").select(["action", "entity_id", "before", "after", "staff_id"]).execute(),
+      trx
+        .selectFrom("audit_log")
+        .select(["action", "entity_id", "before", "after", "staff_id"])
+        // Their upcoming groom's deposit was refunded too (its own entry).
+        .where("action", "=", "customer.delete")
+        .execute(),
     );
     expect(log).toEqual([
       {

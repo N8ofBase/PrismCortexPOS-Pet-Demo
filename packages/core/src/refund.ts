@@ -98,23 +98,27 @@ export function taxShares(
   );
 }
 
+/** How a sale was paid. A deposit is card money taken online before the visit. */
+export type PaymentMethod = "card" | "cash" | "deposit";
+
 export interface RefundablePayment {
   id: string;
-  method: "card" | "cash";
+  method: PaymentMethod;
   /** Amount minus what's already been refunded. */
   availableCents: number;
 }
 
 export interface PaymentRefund {
   paymentId: string;
-  method: "card" | "cash";
+  method: PaymentMethod;
   amountCents: number;
 }
 
-/** Where the money goes back: card payments first (in the order taken), then cash. */
+/** Where the money goes back: card payments first (in the order taken), then the online deposit, then cash. */
 export function splitRefund(amountCents: number, payments: RefundablePayment[]): PaymentRefund[] {
   const ordered = [
     ...payments.filter((p) => p.method === "card"),
+    ...payments.filter((p) => p.method === "deposit"),
     ...payments.filter((p) => p.method === "cash"),
   ];
   const available = ordered.reduce((s, p) => s + Math.max(0, p.availableCents), 0);
@@ -132,11 +136,13 @@ export function splitRefund(amountCents: number, payments: RefundablePayment[]):
 }
 
 /** "Refund $43.21 to the card · Hand back $10.00 cash" */
-export function refundSplitLabel(parts: { method: "card" | "cash"; amountCents: number }[]): string {
-  const card = parts.filter((p) => p.method === "card").reduce((s, p) => s + p.amountCents, 0);
-  const cash = parts.filter((p) => p.method === "cash").reduce((s, p) => s + p.amountCents, 0);
+export function refundSplitLabel(parts: { method: PaymentMethod; amountCents: number }[]): string {
+  const sum = (m: PaymentMethod) =>
+    parts.filter((p) => p.method === m).reduce((s, p) => s + p.amountCents, 0);
+  const [card, deposit, cash] = [sum("card"), sum("deposit"), sum("cash")];
   const out: string[] = [];
   if (card) out.push(`Refund ${formatMoney(card)} to the card`);
+  if (deposit) out.push(`Refund ${formatMoney(deposit)} to the card that paid the deposit`);
   if (cash) out.push(`Hand back ${formatMoney(cash)} cash`);
   return out.length ? out.join(" · ") : "Nothing to pay back";
 }

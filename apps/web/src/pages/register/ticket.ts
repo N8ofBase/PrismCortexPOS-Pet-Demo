@@ -18,6 +18,8 @@ export interface GroomLineState {
   /** "Full groom + Teeth brushing · Biscuit" */
   name: string;
   priceCents: number;
+  /** Paid online when booking; the server applies it at checkout. */
+  depositCents?: number;
 }
 
 export interface TicketDiscountState {
