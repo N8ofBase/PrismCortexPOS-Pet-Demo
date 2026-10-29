@@ -49,6 +49,7 @@ const appt = (over: Partial<AppointmentRow> = {}): AppointmentRow => ({
   noteCount: 0,
   lastNote: null,
   holdUntil: null,
+  reach: { channel: "sms", to: "2125550100" },
   deposit: null,
   source: "staff",
   ...over,
@@ -128,6 +129,7 @@ const service = (over: Partial<ServiceRow>): ServiceRow => ({
   minutes: { S: 90, M: 120, L: 150, XL: 180 },
   bufferMinutes: 15,
   depositCents: 0,
+  rebookWeeks: null,
   online: true,
   active: true,
   archived: false,
@@ -143,7 +145,7 @@ describe("booking form", () => {
       warnings: ["Biscuit's rabies vaccination expired 2026-09-20. Ask for proof before the groom."],
       clash: null,
     };
-    renderAs(
+    const { call } = renderAs(
       "cashier",
       <BookingPanel
         from={{ day: todayIso(), staffId: "g1", start: 540, customerId: "c1" }}
@@ -169,6 +171,7 @@ describe("booking form", () => {
           pets: [{ id: "p1", name: "Biscuit", breed: "Beagle", size: "M", vaccinations: [] }],
         },
         checkAppointment: () => check,
+        bookAppointment: { ...appt(), confirmation: null },
       },
     );
     const quote = await screen.findByLabelText("Quote");
@@ -178,6 +181,14 @@ describe("booking form", () => {
     expect(book.disabled).toBe(true);
     fireEvent.click(screen.getByLabelText("Book anyway"));
     expect(book.disabled).toBe(false);
+    // A confirmation goes by default; unticked, none.
+    const confirm = screen.getByLabelText("Send a confirmation") as HTMLInputElement;
+    expect(confirm.checked).toBe(true);
+    fireEvent.click(confirm);
+    fireEvent.click(book);
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith("bookAppointment", expect.objectContaining({ confirm: false })),
+    );
 
     check = {
       ...check,

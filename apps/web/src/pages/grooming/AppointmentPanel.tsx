@@ -432,10 +432,13 @@ function MoveForm({ a, onDone }: { a: AppointmentRow; onDone: () => void }) {
   );
 }
 
-const KIND_LABEL = {
-  ready: "Ready text",
-  moved: "Change text",
-  canceled: "Canceled text",
+export const KIND_LABEL = {
+  confirm: "Confirmation",
+  reminder: "Reminder",
+  nudge: "Rebook reminder",
+  ready: "Ready for pickup",
+  moved: "Change",
+  canceled: "Canceled",
   deposit: "Deposit link",
 } as const;
 
@@ -451,19 +454,25 @@ function Messages({ a, canText }: { a: AppointmentRow; canText: boolean }) {
   const send = useMutation({
     mutationFn: () => api.call("textAppointment", { id: a.id, kind: "moved" }),
     onSuccess: () => {
-      toast("Text saved (a preview in the demo)");
+      toast("Message saved (a preview in the demo)");
       void qc.invalidateQueries({ queryKey: ["appointmentMessages", a.id] });
     },
     onError: (err) => toast(errorMessage(err)),
   });
   const list = q.data ?? [];
-  if (!list.length && !(canText && a.customerPhone)) return null;
+  const reachable = "channel" in a.reach;
   return (
-    <section style={{ display: "grid", gap: 6 }} aria-label="Texts to the customer">
-      <h3 style={{ margin: 0 }}>Texts to the customer</h3>
+    <section style={{ display: "grid", gap: 6 }} aria-label="Messages to the customer">
+      <h3 style={{ margin: 0 }}>Messages to the customer</h3>
+      <span className="muted small">
+        {"channel" in a.reach
+          ? `By ${a.reach.channel === "sms" ? `text to ${formatPhone(a.reach.to)}` : `email to ${a.reach.to}`}.`
+          : `No messages: ${a.reach.none}.`}
+      </span>
       {list.map((m) => (
         <div key={m.id} className="sub">
-          <b>{KIND_LABEL[m.kind]}</b> to {formatPhone(m.to)} ·{" "}
+          <b>{KIND_LABEL[m.kind]}</b> {m.channel === "sms" ? "text" : "email"} to{" "}
+          {m.channel === "sms" ? formatPhone(m.to) : m.to} ·{" "}
           {new Date(m.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
           <div className="receipt" style={{ marginTop: 4 }}>
             {m.body}
@@ -472,13 +481,13 @@ function Messages({ a, canText }: { a: AppointmentRow; canText: boolean }) {
       ))}
       {list.length > 0 && (
         <p className="muted small" style={{ margin: 0 }}>
-          In the demo, texts aren't sent. In the hosted version they go by Amazon SMS.
+          In the demo, nothing is sent. In the hosted version texts go by Amazon SMS and emails by Amazon SES.
         </p>
       )}
-      {canText && a.customerPhone && (
+      {canText && reachable && (
         <div>
           <button type="button" onClick={() => send.mutate()} disabled={send.isPending}>
-            Text the customer the current time and groomer
+            Tell the customer the current time and groomer
           </button>
         </div>
       )}

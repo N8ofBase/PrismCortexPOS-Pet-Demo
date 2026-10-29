@@ -1,6 +1,6 @@
 # Phase 4 plan: online booking
 
-Status: **4a and 4b built. 4c not planned yet.**
+Status: **4a, 4b and 4c built. Phase 4 is done.**
 
 Built differently from the plan in 4a:
 - A wrong sign-in code is returned as a result (`{status: "wrong"}`), not thrown, so the try count is saved; a thrown error would roll it back.
@@ -340,3 +340,152 @@ No card data touches our code either way.
 - **Real Square:** payment links and the webhook come with 2d and hosted mode. The interface is ready.
 - **Texts and emails:** the deposit link texted after a phone booking is a preview only. Confirmations and reminders are 4c.
 - **Other deposit types:** percentage deposits, charging a card on file for no-shows, and gift cards or store credit.
+
+---
+
+## Session 4c: confirmations, reminders and rebook nudges
+
+Status: **approved and built.**
+
+Built differently from the plan:
+- **Unsubscribe token:** it's kept per message (`appointment_messages.unsubscribe_token_hash`), not on the customer, so every emailed link keeps working.
+- **Email opt-out:** "All email" sets a new `customers.email_off` flag.
+- **The STOP line:** it's added to the first text sent to a number, whatever kind of message that is.
+- **The sweep:** it's `sendDueNow` (grooming.view). The demo runs it when the Grooming page opens, on any view, at most every 5 minutes.
+- **Old grooms:** a nudge whose due date passed more than 30 days ago is skipped, so a first sweep over imported history doesn't send a flood. Only each pet's latest finished groom counts.
+- **Late bookings:** a groom booked after its reminder time gets no reminder; its confirmation covers it.
+- **Demo data:** the seeded past groom is Clover's, not Rex's, because Rex has a groom today.
+
+When it's done, the store sends three kinds of messages to customers:
+- **Confirmation:** sent when a groom is booked, online or at the counter, and when a held booking's deposit is paid.
+- **Reminder:** sent the day before the groom.
+- **Rebook nudge:** "Time for Biscuit's next groom?", sent a set number of weeks after a finished groom, when the pet has nothing booked.
+
+Each one goes by text or email, as the customer chooses, and every opt-out is honored. In the demo nothing is really sent: every message lands in an outbox you can read, like the ready texts do now. Hosted mode sends texts through AWS End User Messaging (SMS) and emails through SES, from the same outbox.
+
+### Who gets what, and how
+
+One rule, `channelFor()` in `packages/core/src/messages.ts`, decides the channel for every customer message. The ready, moved and canceled texts from 3c go through it too.
+
+- **Text:** used when the customer has a phone and has opted in to texts (`sms_opt_in`, which is already on the customer).
+- **Email:** used when the customer has an email and either prefers email or can't get texts.
+- **Nothing:** when neither applies, the message isn't sent. Staff see a note on the appointment: "No reminder: this customer has no text opt-in or email."
+- **Preference:** a customer with both a phone and an email picks one. This is the new `contact_pref` column (`text` or `email`), defaulting to text when they've opted in.
+- **Turning things off:** a customer can turn off rebook nudges (`nudges_off`) without losing confirmations and reminders. Replying STOP to a text clears `sms_opt_in` in hosted mode. Emailed nudges carry an unsubscribe link.
+- **Consent record:** turning on texts records when and where the customer agreed (`sms_opt_in_at`, `sms_opt_in_source`: `counter`, `online` or `import`), for the 10DLC campaign.
+- **Change from 3c:** the ready text now honors the opt-in too. Today it goes to any customer with a phone.
+
+### When reminders and nudges go out
+
+Confirmations go out right away. Reminders and nudges are due at a time, so one sweep sends whatever is due: `sendDueMessages(trx, now)`.
+
+- **Reminder:**
+  - when: the day before the groom, at the store's reminder time (default 10:00 AM)
+  - what it covers: every booked or checked-in groom tomorrow
+  - sent once per appointment
+- **Rebook nudge:**
+  - when: the service's rebook weeks after a finished groom (Full groom 6, Bath & brush 4; a store-wide default when a service has none)
+  - who gets it: only pets with no upcoming groom, from customers with nudges on
+  - limits: once per finished groom, and never more than one nudge per pet in 14 days
+- **Quiet hours:** nothing goes out before 9:00 AM or after 8:00 PM store time. A message due outside those hours waits for the next morning.
+- **Safe to run often:** a unique index on `(appointment_id, kind)` for confirmation, reminder and nudge means running the sweep twice never sends twice.
+- **Hosted mode:** EventBridge Scheduler runs the sweep every 15 minutes, per business. The sweep itself is the same code.
+- **Demo:** there's no background process, so the sweep runs when the grooming calendar or the Messages view opens. **Send due messages now** runs it by hand.
+
+### What they say
+
+The wording joins `appointmentText` in core. Texts are kept under 160 characters where possible, and each ends with the store name and "Reply STOP to opt out" the first time. For example:
+- **Confirmation:** "Sample Pet Store: Biscuit's Full groom is booked for Thu Oct 29 at 9:00 AM with Sample Groomer. $20.00 deposit paid. Manage it: petpos…/book"
+- **Reminder:** "Sample Pet Store: reminder, Biscuit's groom is tomorrow, Thu Oct 29 at 9:00 AM. Need to change it? Call (212) 555-0199."
+- **Nudge:** "Sample Pet Store: it's been 6 weeks since Biscuit's last groom. Book the next one: petpos…/book"
+
+Emails use the same words, with a subject line and a plain HTML layout. A nudge email has the unsubscribe link.
+
+The online booking link in a nudge opens the booking page with the pet and service already picked (`/book?pet=…&service=…`). That reuses the Book again path from 4a.
+
+### Staff side
+
+- **Grooming → Messages** (a new view beside Calendar, Services and Groomers):
+  - every customer message: when, to whom, kind, channel, status (Preview in the demo), and the text
+  - filters by kind and day
+  - **Send due messages now**
+- **Appointment panel:**
+  - the messages for that groom, as now, with the new kinds
+  - "Confirmation sent by text" after booking, or why nothing was sent
+- **Booking at the counter:** a **Send a confirmation** checkbox, ticked by default.
+- **Customer form:** "Texts" (opted in, with when and where), "Send reminders by: text / email", and "Rebook reminders" on or off.
+- **Services:** a **Rebook after (weeks)** field per service. Empty means the store default.
+- **Settings → Messages** (owner):
+  - confirmations on or off
+  - reminders on or off, and the time the day before
+  - rebook nudges on or off, and the default weeks
+  - the 9:00 AM to 8:00 PM quiet hours, shown but not editable (they follow the law)
+
+### Customer side
+
+- **My account:** a **Messages** tab:
+  - text or email
+  - texts on or off; turning texts on shows the consent wording and records it
+  - rebook reminders on or off
+- **Unsubscribe page:** `/book/unsubscribe?t=…` turns off nudges, or all email, without signing in. The token is random, stored hashed, and only good for that customer's message settings.
+
+### Database: migration 019_messages
+
+- **`customers`:**
+  - `contact_pref`: `text` or `email`
+  - `nudges_off`
+  - `sms_opt_in_at` and `sms_opt_in_source`
+  - `unsubscribe_token_hash`
+- **`businesses`:**
+  - `confirm_on`
+  - `remind_on` and `remind_time` (default 10:00)
+  - `nudge_on` and `nudge_weeks` (default 6)
+- **`services`:** `rebook_weeks`; the demo sets Full groom to 6 and Bath & brush to 4.
+- **`appointment_messages`:**
+  - the channel can be `email`
+  - adds `subject` and `due_at`
+  - kinds add `confirm`, `reminder` and `nudge`
+  - a unique index on `(appointment_id, kind)` for `confirm`, `reminder` and `nudge`
+- **Demo data,** added through `once(...)`:
+  - Rex has a finished Bath & brush 5 weeks ago and nothing booked, so a nudge is due
+  - one groom is booked for tomorrow, so a reminder is due
+
+### Handlers
+
+- **Shared:** `sendDueMessages()` and `notify()` in `services/api/src/messages.ts`. Every customer message goes through `notify()`.
+- **Messenger interface:** `services/api/src/messaging/outbox.ts` (`PreviewMessenger` in the demo; SES and SMS adapters later, in hosted mode).
+- **Staff handlers:**
+  - **`listMessages({ from, to, kind })`**
+  - **`sendDueNow()`:** owner or manager only, and demo only in the UI
+  - **`saveMessageSettings`**
+  - Booking takes `confirm`.
+  - **`saveCustomer`** takes the new preferences and records consent.
+- **Public handlers:**
+  - **`myMessageSettings`** and **`saveMyMessageSettings`**
+  - **`unsubscribe({ token, what })`:** this one doesn't need a sign-in.
+
+### Tests
+
+- **Core:**
+  - `channelFor()` for each mix of phone, email, opt-in and preference
+  - quiet hours, including a reminder due at 8:30 PM waiting until 9:00 AM
+  - when each reminder and nudge falls due
+  - message wording and length
+- **API:**
+  - Booking sends one confirmation by the customer's channel. A held booking confirms only once paid.
+  - The sweep sends tomorrow's reminders once, even when run twice. Canceled and no-show grooms get none.
+  - Nudges respect rebook weeks, the pet's upcoming grooms, `nudges_off` and the 14-day limit.
+  - Opted-out customers get no texts, and the ready text now honors the opt-in.
+  - Unsubscribe tokens work for their own customer only.
+  - Separation tests: another customer and another business can't see these messages.
+- **Web:**
+  - the Messages view and Send due messages now
+  - the customer form preferences and the My account Messages tab
+  - the Send a confirmation checkbox
+
+### Out of scope for 4c
+
+- **Real sending:** SES, 10DLC SMS and the STOP webhook come with hosted mode. The outbox and the messenger interface are ready for them.
+- **Editable message wording:** the wording is fixed for now.
+- **Two-way texting:** a staff inbox for replies isn't planned.
+- **Marketing blasts:** messages to all customers aren't planned.

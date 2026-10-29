@@ -174,7 +174,13 @@ export async function customerRow(r: Row, rc: RowCtx): Promise<RowResult> {
   if (r.smsOptIn !== undefined) {
     const yes = parseYesNo(r.smsOptIn);
     if (yes === undefined) rc.warn(`SMS opt-in "${r.smsOptIn}" isn't yes or no, left as it was`);
-    else if (yes !== null) values.sms_opt_in = yes;
+    else if (yes !== null) {
+      values.sms_opt_in = yes;
+      if (yes) {
+        values.sms_opt_in_at = new Date();
+        values.sms_opt_in_source = "import";
+      }
+    }
   }
   const pets = petsInRow(r, rc);
 

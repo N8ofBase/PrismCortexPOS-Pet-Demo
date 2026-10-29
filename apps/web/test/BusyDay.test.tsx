@@ -48,6 +48,7 @@ const appt = (over: Partial<AppointmentRow> = {}): AppointmentRow => ({
   noteCount: 0,
   lastNote: null,
   holdUntil: null,
+  reach: { channel: "sms", to: "2125550100" },
   deposit: null,
   source: "staff",
   ...over,

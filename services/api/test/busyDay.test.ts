@@ -142,11 +142,11 @@ describe("moving an appointment", () => {
     );
     await db
       .updateTable("customers")
-      .set({ phone: null })
+      .set({ sms_opt_in: false, email: null })
       .where("id", "=", pets.Biscuit!.customerId)
       .execute();
     await expect(invoke(db, cashier, "textAppointment", { id: a.id, kind: "canceled" })).rejects.toThrow(
-      /no phone/,
+      "Nothing was sent: this customer hasn't agreed to texts and has no email.",
     );
   });
 });
@@ -175,7 +175,8 @@ describe("a groomer calls out", () => {
         { id: juno.id, action: "cancel" },
       ],
     });
-    expect(res).toEqual({ moved: 2, canceled: 1, left: 0, texts: 3 });
+    // Mo's owner hasn't agreed to texts and has no email, so two go out.
+    expect(res).toEqual({ moved: 2, canceled: 1, left: 0, texts: 2 });
     const day = await invoke(db, owner, "groomingDay", { day: tue });
     expect(day.appointments.filter((a) => a.staffId === B).map((a) => [a.petName, a.start])).toEqual([
       ["Biscuit", 600],
@@ -184,7 +185,7 @@ describe("a groomer calls out", () => {
     expect(day.groomers.find((g) => g.staffId === A)!.timeOff).toEqual([
       { start: 0, end: 1440, note: "Called out" },
     ]);
-    expect((await messages(juno.id)).map((m) => m.kind)).toEqual(["canceled"]);
+    expect((await messages(juno.id)).map((m) => m.kind)).toEqual(["confirm", "canceled"]);
     const log = await withBusiness(db, businessId, (trx) =>
       trx.selectFrom("audit_log").select("after").where("action", "=", "grooming.callout").execute(),
     );
@@ -231,9 +232,9 @@ describe("ready-for-pickup text", () => {
     await go(a.id);
     await invoke(db, groomer, "setAppointmentStatus", { id: a.id, status: "in_progress" });
     await invoke(db, groomer, "setAppointmentStatus", { id: a.id, status: "ready" });
-    expect((await messages(a.id)).map((m) => [m.kind, m.to, m.body])).toEqual([
-      ["ready", "2125550100", "Sample Pet Store (DEMO): Biscuit is ready for pickup!"],
-    ]);
+    expect(
+      (await messages(a.id)).filter((m) => m.kind === "ready").map((m) => [m.kind, m.to, m.body]),
+    ).toEqual([["ready", "2125550100", "Sample Pet Store (DEMO): Biscuit is ready for pickup!"]]);
 
     const set = await invoke(db, owner, "getSettings", undefined);
     expect(set.textWhenReady).toBe(true);

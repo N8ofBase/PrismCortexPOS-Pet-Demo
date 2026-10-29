@@ -64,8 +64,22 @@ export interface PetDetail extends PetSummary {
   vaccinations: Vaccination[];
 }
 
+/** How the customer wants messages about their grooms (Phase 4c). */
+export interface CustomerMessagePrefs {
+  /** Text or email when they have both; null means text when they've agreed to texts. */
+  contactPref: "text" | "email" | null;
+  /** No "time for the next groom?" reminders. */
+  nudgesOff: boolean;
+  /** Unsubscribed from all email. */
+  emailOff: boolean;
+}
+
 export interface CustomerProfile extends Omit<CustomerCard, "pets"> {
   smsOptIn: boolean;
+  /** When and where they agreed to texts. */
+  smsOptInAt: Date | null;
+  smsOptInSource: "counter" | "online" | "import" | null;
+  messages: CustomerMessagePrefs;
   notes: string | null;
   pets: PetDetail[];
 }
@@ -176,7 +190,16 @@ export const getCustomer = defineHandler<{ id: string }, CustomerProfile>({
   async run(trx, _ctx, { id }) {
     const c = await trx
       .selectFrom("customers")
-      .select([...CUSTOMER_COLUMNS, "sms_opt_in", "notes"])
+      .select([
+        ...CUSTOMER_COLUMNS,
+        "sms_opt_in",
+        "sms_opt_in_at",
+        "sms_opt_in_source",
+        "contact_pref",
+        "nudges_off",
+        "email_off",
+        "notes",
+      ])
       .where("id", "=", id)
       .executeTakeFirst();
     if (!c) throw new AppError("not_found", "That customer doesn't exist. They may have been deleted.");
@@ -200,10 +223,22 @@ export const getCustomer = defineHandler<{ id: string }, CustomerProfile>({
           .execute()
       : [];
     const cards = await punchCards(trx, [id]);
-    const { sms_opt_in, notes, ...rest } = c;
+    const {
+      sms_opt_in,
+      sms_opt_in_at,
+      sms_opt_in_source,
+      contact_pref,
+      nudges_off,
+      email_off,
+      notes,
+      ...rest
+    } = c;
     return {
       ...rest,
       smsOptIn: sms_opt_in,
+      smsOptInAt: sms_opt_in_at,
+      smsOptInSource: sms_opt_in_source,
+      messages: { contactPref: contact_pref, nudgesOff: nudges_off, emailOff: email_off },
       notes,
       punchCards: cards.get(id) ?? [],
       pets: pets.map((p) => ({
@@ -239,7 +274,7 @@ export interface PetRowInput {
  * update that pet, rows without one are added, and the customer's other pets are removed.
  */
 export const saveCustomer = defineHandler<
-  { id?: string; customer: CustomerInput; pets: PetRowInput[] },
+  { id?: string; customer: CustomerInput; pets: PetRowInput[]; messages?: CustomerMessagePrefs },
   { id: string }
 >({
   action: "customers.edit",
@@ -277,19 +312,43 @@ export const saveCustomer = defineHandler<
       birthday: c.birthday,
       sms_opt_in: c.smsOptIn,
       notes: c.notes,
+      ...(input.messages
+        ? {
+            contact_pref:
+              input.messages.contactPref === "email" || input.messages.contactPref === "text"
+                ? input.messages.contactPref
+                : null,
+            nudges_off: !!input.messages.nudgesOff,
+            email_off: !!input.messages.emailOff,
+          }
+        : {}),
     };
+    // Record when and where they agreed to texts (for the 10DLC campaign).
+    const was = input.id
+      ? await trx.selectFrom("customers").select("sms_opt_in").where("id", "=", input.id).executeTakeFirst()
+      : undefined;
+    const consent =
+      c.smsOptIn && !was?.sms_opt_in
+        ? { sms_opt_in_at: new Date(), sms_opt_in_source: "counter" as const }
+        : !c.smsOptIn
+          ? { sms_opt_in_at: null, sms_opt_in_source: null }
+          : {};
 
     try {
       let id = input.id;
       if (id) {
-        const res = await trx.updateTable("customers").set(values).where("id", "=", id).executeTakeFirst();
+        const res = await trx
+          .updateTable("customers")
+          .set({ ...values, ...consent })
+          .where("id", "=", id)
+          .executeTakeFirst();
         if (res.numUpdatedRows === 0n)
           throw new AppError("not_found", "That customer doesn't exist anymore.");
       } else {
         id = (
           await trx
             .insertInto("customers")
-            .values({ ...values, business_id: ctx.businessId })
+            .values({ ...values, ...consent, business_id: ctx.businessId })
             .returning("id")
             .executeTakeFirstOrThrow()
         ).id;

@@ -10,6 +10,7 @@ import { StoreMark } from "../ui/StoreMark.tsx";
 import { TwoTapButton } from "../ui/TwoTapButton.tsx";
 import { BookFlow, type BookStart } from "./BookFlow.tsx";
 import { BookingContext, loadCustomer, saveCustomer, useBooking } from "./context.ts";
+import { MessagePrefs, Unsubscribe } from "./MessagePrefs.tsx";
 import { goPay, payIdFromPath, PayPage } from "./PayPage.tsx";
 import { SignIn } from "./SignIn.tsx";
 
@@ -32,6 +33,9 @@ function WithStore({ db, businessId }: { db: Kysely<DB>; businessId: string }) {
   // The payment page (simulated Square in the demo) lives at /book/pay/<deposit id>.
   const [payId, setPayId] = useState(() => payIdFromPath(location.pathname));
   const [returned, setReturned] = useState<DepositView | null>(null);
+  // From the unsubscribe link in a rebook email.
+  const unsubscribeToken =
+    location.pathname === "/book/unsubscribe" ? new URLSearchParams(location.search).get("t") : null;
   useEffect(() => {
     const sync = () => setPayId(payIdFromPath(location.pathname));
     addEventListener("popstate", sync);
@@ -93,7 +97,9 @@ function WithStore({ db, businessId }: { db: Kysely<DB>; businessId: string }) {
           ) : (
             <>
               {p.message && <p className="muted">{p.message}</p>}
-              {!customer ? (
+              {unsubscribeToken ? (
+                <Unsubscribe token={unsubscribeToken} />
+              ) : !customer ? (
                 <SignIn />
               ) : payId ? (
                 <PayPage
@@ -121,7 +127,15 @@ function WithStore({ db, businessId }: { db: Kysely<DB>; businessId: string }) {
   );
 }
 
-type Tab = "book" | "mine" | "pets";
+type Tab = "book" | "mine" | "pets" | "messages";
+
+/** A rebook link ("/book?pet=…&service=…") opens the booking with those picked. */
+function startFromLink(): BookStart | undefined {
+  const q = new URLSearchParams(location.search);
+  const petId = q.get("pet") ?? undefined;
+  const serviceId = q.get("service") ?? undefined;
+  return petId || serviceId ? { petId, serviceId } : undefined;
+}
 
 /** "10:15 AM" for a hold's end. */
 export const holdTime = (d: Date | string) => clockText(minutesOfDay(new Date(d)));
@@ -137,7 +151,7 @@ function Account({
 }) {
   const { api, name, signOut } = useBooking();
   const [tab, setTab] = useState<Tab>("book");
-  const [start, setStart] = useState<BookStart | undefined>();
+  const [start, setStart] = useState<BookStart | undefined>(startFromLink);
   const [moving, setMoving] = useState<MyAppointment | null>(null);
   const [booked, setBooked] = useState<MyAppointment | null>(null);
   const acct = useQuery({ queryKey: ["myAccount"], queryFn: () => api.call("myAccount") });
@@ -179,6 +193,9 @@ function Account({
         </button>
         <button type="button" aria-pressed={tab === "pets"} onClick={() => setTab("pets")}>
           My pets
+        </button>
+        <button type="button" aria-pressed={tab === "messages"} onClick={() => setTab("messages")}>
+          Messages
         </button>
       </div>
 
@@ -257,6 +274,7 @@ function Account({
         />
       )}
       {tab === "pets" && <MyPets />}
+      {tab === "messages" && <MessagePrefs />}
     </div>
   );
 }

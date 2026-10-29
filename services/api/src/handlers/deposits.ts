@@ -1,11 +1,11 @@
 // Staff side of deposits: asking for one on a phone booking (with an optional text of
 // the link), and refunding one by hand. Holding, paying, keeping and applying live in
 // ../deposits.ts, shared with the booking page and the register.
-import { AppError, appointmentText, minutesOfDay } from "@pet-pos/core";
+import { AppError } from "@pet-pos/core";
 import { defineHandler } from "../handler.ts";
 import { createDeposit, refundDeposit as giveBack } from "../deposits.ts";
+import { notify } from "../messages.ts";
 import { requireInt } from "../shared.ts";
-import { localDay } from "./grooming.ts";
 
 export interface DepositRequest {
   depositId: string;
@@ -50,29 +50,11 @@ export const requestDeposit = defineHandler<
     const cents = amountCents ?? Math.min(a.deposit_cents, a.price_cents);
     if (!cents) throw new AppError("invalid", "This service has no deposit set. Enter an amount.");
     requireInt(cents, "Deposit", { min: 1, max: a.price_cents });
-    if (text && !a.phone) throw new AppError("invalid", "This customer has no phone number on file.");
     const d = await createDeposit(trx, { businessId: ctx.businessId, appointmentId, amountCents: cents });
     let texted: string | null = null;
-    if (text && a.phone) {
-      texted = appointmentText.deposit(
-        a.store,
-        a.pet_name,
-        localDay(a.starts_at),
-        minutesOfDay(a.starts_at),
-        cents,
-        d.url,
-      );
-      await trx
-        .insertInto("appointment_messages")
-        .values({
-          business_id: ctx.businessId,
-          appointment_id: appointmentId,
-          kind: "deposit",
-          to_address: a.phone,
-          body: texted,
-          created_by: ctx.staffId,
-        })
-        .execute();
+    if (text) {
+      const r = await notify(trx, ctx, appointmentId, "deposit", { depositUrl: d.url });
+      if ("sent" in r) texted = r.sent.body;
     }
     return { depositId: d.id, amountCents: cents, url: d.url, texted };
   },

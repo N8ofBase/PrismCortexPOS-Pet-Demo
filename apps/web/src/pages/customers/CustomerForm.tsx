@@ -10,7 +10,7 @@ import {
   type CustomerInput,
   type Species,
 } from "@pet-pos/core";
-import type { CustomerProfile } from "@pet-pos/api";
+import type { CustomerProfile, CustomerMessagePrefs } from "@pet-pos/api";
 import { useSession } from "../../session.tsx";
 import { errorMessage, fieldErrors } from "../../ui/errors.ts";
 import { SlideOver } from "../../ui/SlideOver.tsx";
@@ -71,6 +71,8 @@ export function CustomerForm({
   return <Form key={id ?? "new"} profile={existing.data ?? null} onClose={onClose} onSaved={onSaved} />;
 }
 
+const OPT_IN_SOURCE = { counter: "at the counter", online: "online", import: "imported" } as const;
+
 function toInput(p: CustomerProfile): CustomerInput {
   return {
     name: p.name,
@@ -99,6 +101,9 @@ function Form({
   const qc = useQueryClient();
   const toast = useToast();
   const [c, setC] = useState<CustomerInput>(profile ? toInput(profile) : EMPTY);
+  const [msg, setMsg] = useState<CustomerMessagePrefs>(
+    profile?.messages ?? { contactPref: null, nudgesOff: false, emailOff: false },
+  );
   const [pets, setPets] = useState<PetRow[]>(
     profile?.pets.length
       ? profile.pets.map((p) => ({
@@ -119,6 +124,7 @@ function Form({
         id: profile?.id,
         customer: c,
         pets: pets.map(({ id, name, species, breed, birthday }) => ({ id, name, species, breed, birthday })),
+        messages: msg,
       }),
     onSuccess: ({ id }) => {
       toast(profile ? "Customer saved" : "Customer added");
@@ -189,8 +195,40 @@ function Form({
             checked={c.smsOptIn}
             onChange={(e) => setC({ ...c, smsOptIn: e.target.checked })}
           />
-          Text messages OK (reminders and pickup alerts)
+          Text messages OK (confirmations, reminders and pickup alerts)
         </label>
+        {profile?.smsOptIn && profile.smsOptInAt && (
+          <span className="muted small">
+            Agreed {new Date(profile.smsOptInAt).toLocaleDateString()}
+            {profile.smsOptInSource ? ` · ${OPT_IN_SOURCE[profile.smsOptInSource]}` : ""}
+          </span>
+        )}
+        <div className="form" style={{ alignItems: "end" }}>
+          <label>
+            Send messages by
+            <select
+              value={msg.contactPref ?? "text"}
+              onChange={(e) => setMsg({ ...msg, contactPref: e.target.value as "text" | "email" })}
+            >
+              <option value="text">Text</option>
+              <option value="email">Email</option>
+            </select>
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={!msg.nudgesOff}
+              onChange={(e) => setMsg({ ...msg, nudgesOff: !e.target.checked })}
+            />
+            Rebook reminders
+          </label>
+          {msg.emailOff && (
+            <label className="check">
+              <input type="checkbox" checked={false} onChange={() => setMsg({ ...msg, emailOff: false })} />
+              Unsubscribed from email · tick to send email again
+            </label>
+          )}
+        </div>
         <label>
           Notes
           <textarea rows={2} value={c.notes} onChange={set("notes")} />

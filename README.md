@@ -27,7 +27,12 @@ Status: **Phases 1, 2 (except 2d, real Square) and 3 are done** in demo mode.
   - It's refunded on an in-time cancel, and kept as a fee on a no-show as the store chooses.
   - Staff can ask for a deposit on phone bookings.
 
-The demo is live at https://petpos-demo.prismcortex.net (booking page: https://petpos-demo.prismcortex.net/book). Next: Phase 4c (confirmations, reminders and rebook nudges).
+- Phase 4c: messages to customers about their grooms.
+  - Booking confirmations, the day-before reminder, and rebook reminders a set number of weeks after a groom.
+  - Each goes by text or email as the customer chooses, with opt-outs and quiet hours honored.
+  - They show in Grooming → Messages; previews only in the demo.
+
+The demo is live at https://petpos-demo.prismcortex.net (booking page: https://petpos-demo.prismcortex.net/book). Phase 4 is done.
 
 ## Run it
 

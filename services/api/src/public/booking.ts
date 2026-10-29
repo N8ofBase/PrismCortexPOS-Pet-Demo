@@ -37,6 +37,7 @@ import {
   type ServiceRow,
 } from "../handlers/grooming.ts";
 import { apptWhen, createDeposit, markDepositPaid, refundDeposit, releaseHolds } from "../deposits.ts";
+import { confirmBooking } from "../messages.ts";
 import { definePublic, type PublicCtx, type SignedCtx } from "./handler.ts";
 
 type Trx = Transaction<DB>;
@@ -767,6 +768,7 @@ export const bookOnline = definePublic<
         appointmentId: row.id,
         amountCents: depositCents,
       });
+    else await confirmBooking(trx, { businessId: ctx.businessId, staffId: null }, row.id);
     return mine(trx, ctx, row.id);
   },
 });

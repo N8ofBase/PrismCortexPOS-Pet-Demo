@@ -237,7 +237,7 @@ describe("deleteCustomer", () => {
       petNames: ["Biscuit"],
       punchCards: 1,
       vaccinations: 2,
-      appointments: 1,
+      appointments: 2,
     });
 
     await invoke(db, manager, "deleteCustomer", { id: sample!.id });
@@ -260,7 +260,7 @@ describe("deleteCustomer", () => {
           pets: 1,
           punch_cards: 1,
           vaccinations: 2,
-          appointments_canceled: 1,
+          appointments_canceled: 2,
         },
         after: null,
         staff_id: manager.staffId,

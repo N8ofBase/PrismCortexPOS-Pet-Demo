@@ -18,6 +18,7 @@ import {
   verifyCode,
 } from "./booking.ts";
 import type { PublicHandler } from "./handler.ts";
+import { myMessageSettings, saveMyMessageSettings, unsubscribe } from "./messages.ts";
 
 /** Everything the public booking page can call. Nothing from the staff registry is here. */
 export const publicHandlers = {
@@ -34,6 +35,9 @@ export const publicHandlers = {
   depositStatus,
   payDeposit,
   simulateDepositPayment,
+  myMessageSettings,
+  saveMyMessageSettings,
+  unsubscribe,
 };
 
 export type PublicHandlers = typeof publicHandlers;

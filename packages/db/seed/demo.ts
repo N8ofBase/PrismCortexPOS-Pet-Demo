@@ -34,6 +34,7 @@ export async function ensureDemo(db: Kysely<DB>): Promise<string> {
     await once(trx, businessId, "grooming", "services", seedGrooming);
     await once(trx, businessId, "grooming_supplies", "service_supplies", seedGroomingSupplies);
     await once(trx, businessId, "deposits", "deposits", seedDeposits);
+    await once(trx, businessId, "messages", "appointment_messages", seedMessages);
     return businessId;
   });
 }
@@ -46,7 +47,14 @@ async function once(
   trx: Transaction<DB>,
   businessId: string,
   part: string,
-  table: "products" | "customers" | "discounts" | "services" | "service_supplies" | "deposits",
+  table:
+    | "products"
+    | "customers"
+    | "discounts"
+    | "services"
+    | "service_supplies"
+    | "deposits"
+    | "appointment_messages",
   seed: (trx: Transaction<DB>, businessId: string) => Promise<void>,
 ): Promise<void> {
   const done = await trx
@@ -468,6 +476,7 @@ async function seedGrooming(trx: Transaction<DB>, businessId: string): Promise<v
         minutes_xl: v.minutes[3],
         buffer_minutes: v.buffer,
         deposit_cents: v.deposit,
+        rebook_weeks: v.name.includes("Full groom") ? 6 : v.name.includes("Bath") ? 4 : null,
         position: v.position,
         is_demo: true,
       })
@@ -652,6 +661,81 @@ async function seedDeposits(trx: Transaction<DB>, businessId: string): Promise<v
     .set({ deposit_id: dep.id, source: "online" })
     .where("id", "=", appt.id)
     .execute();
+}
+
+/**
+ * Something for the message sweep to send: Clover's bath 5 weeks ago with nothing booked
+ * since (a rebook nudge is due), and Biscuit's bath tomorrow (a reminder is due).
+ */
+async function seedMessages(trx: Transaction<DB>, businessId: string): Promise<void> {
+  const pets = await trx
+    .selectFrom("pets")
+    .select(["id", "name", "size", "customer_id"])
+    .where("business_id", "=", businessId)
+    .where("is_demo", "=", true)
+    .where("name", "in", ["Clover", "Biscuit"])
+    .execute();
+  const bath = await trx
+    .selectFrom("services")
+    .select(["id", "name"])
+    .where("business_id", "=", businessId)
+    .where("is_demo", "=", true)
+    .where("name", "=", "Sample Bath & brush (DEMO)")
+    .executeTakeFirst();
+  const groomers = await trx
+    .selectFrom("staff")
+    .select("id")
+    .where("business_id", "=", businessId)
+    .where("is_demo", "=", true)
+    .where("grooms", "=", true)
+    .orderBy("name")
+    .execute();
+  const loc = await trx
+    .selectFrom("locations")
+    .select("id")
+    .where("business_id", "=", businessId)
+    .orderBy("created_at")
+    .executeTakeFirst();
+  if (!bath || !groomers.length || !loc) return;
+  // Loaded by a browser before this part was recorded: don't add them twice.
+  const already = await trx
+    .selectFrom("appointments")
+    .select("id")
+    .where("business_id", "=", businessId)
+    .where("is_demo", "=", true)
+    .where("pet_name", "=", "Clover")
+    .executeTakeFirst();
+  if (already) return;
+  const add = async (petName: string, day: string, start: number, status: "done" | "booked") => {
+    const pet = pets.find((p) => p.name === petName);
+    if (!pet) return;
+    await trx
+      .insertInto("appointments")
+      .values({
+        business_id: businessId,
+        location_id: loc.id,
+        customer_id: pet.customer_id,
+        pet_id: pet.id,
+        // The second groomer works Sundays; the first doesn't.
+        staff_id: groomers[new Date(`${day}T12:00:00`).getDay() === 0 ? groomers.length - 1 : 0]!.id,
+        service_id: bath.id,
+        service_name: bath.name,
+        pet_name: pet.name,
+        size: pet.size ?? "M",
+        starts_at: atLocal(day, start),
+        ends_at: atLocal(day, start + 75),
+        block_ends_at: atLocal(day, start + 90),
+        status,
+        price_cents: 4500,
+        done_at: status === "done" ? atLocal(day, start + 75) : null,
+        // Booked well before the reminder goes out.
+        created_at: atLocal(addDays(day, -7), 12 * 60),
+        is_demo: true,
+      })
+      .execute();
+  };
+  await add("Clover", addDays(todayIso(), -35), 11 * 60, "done");
+  await add("Biscuit", addDays(todayIso(), 1), 14 * 60, "booked");
 }
 
 /** A simple sample picture (SVG), so the demo's grooming history has photos to show. */

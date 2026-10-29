@@ -20,6 +20,18 @@ export interface StoreSettings {
   /** Text customers when their pet is ready for pickup. */
   textWhenReady: boolean;
   booking: BookingSettings;
+  messages: MessageSettings;
+}
+
+/** Messages to customers (Phase 4c). Quiet hours are fixed: 9:00 AM to 8:00 PM. */
+export interface MessageSettings {
+  confirmOn: boolean;
+  remindOn: boolean;
+  /** Minutes after midnight, the day before the groom (9:00 AM to 8:00 PM). */
+  remindMinute: number;
+  nudgeOn: boolean;
+  /** Rebook weeks for services without their own. */
+  nudgeWeeks: number;
 }
 
 /** Online booking (Phase 4a). */
@@ -65,6 +77,11 @@ export const getSettings = defineHandler<void, StoreSettings>({
         "deposit_hold_minutes",
         "deposit_no_show",
         "public_phone",
+        "confirm_on",
+        "remind_on",
+        "remind_minute",
+        "nudge_on",
+        "nudge_weeks",
       ])
       .where("id", "=", ctx.businessId)
       .executeTakeFirstOrThrow();
@@ -98,6 +115,13 @@ export const getSettings = defineHandler<void, StoreSettings>({
         holdMinutes: b.deposit_hold_minutes as 10 | 15 | 30,
         noShow: b.deposit_no_show,
       },
+      messages: {
+        confirmOn: b.confirm_on,
+        remindOn: b.remind_on,
+        remindMinute: b.remind_minute,
+        nudgeOn: b.nudge_on,
+        nudgeWeeks: b.nudge_weeks,
+      },
     };
   },
 });
@@ -122,6 +146,8 @@ export interface SettingsInput {
   /** Left out: unchanged. The phone can be typed in any format. */
   booking?: Omit<BookingSettings, "phone" | "depositRule" | "holdMinutes" | "noShow"> &
     Partial<Pick<BookingSettings, "depositRule" | "holdMinutes" | "noShow">> & { phone: string | null };
+  /** Left out: unchanged. */
+  messages?: MessageSettings;
 }
 
 export const updateSettings = defineHandler<SettingsInput, void>({
@@ -170,6 +196,14 @@ export const updateSettings = defineHandler<SettingsInput, void>({
         if (!phone) errors.publicPhone = "Enter the store's 10-digit phone number.";
       }
     }
+    const ms = input.messages;
+    if (ms) {
+      const whole = (v: unknown, lo: number, hi: number) =>
+        typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi;
+      if (!whole(ms.remindMinute, 540, 1200))
+        errors.remindMinute = "Send reminders between 9:00 AM and 8:00 PM.";
+      if (!whole(ms.nudgeWeeks, 1, 52)) errors.nudgeWeeks = "Rebook reminders go after 1 to 52 weeks.";
+    }
     const first = Object.values(errors)[0];
     if (first) throw new AppError("invalid", first, errors);
 
@@ -185,6 +219,15 @@ export const updateSettings = defineHandler<SettingsInput, void>({
         ...(float !== undefined ? { drawer_float_cents: float } : {}),
         ...(input.groomingTaxable !== undefined ? { grooming_taxable: input.groomingTaxable } : {}),
         ...(input.textWhenReady !== undefined ? { text_when_ready: input.textWhenReady } : {}),
+        ...(ms
+          ? {
+              confirm_on: ms.confirmOn,
+              remind_on: ms.remindOn,
+              remind_minute: ms.remindMinute,
+              nudge_on: ms.nudgeOn,
+              nudge_weeks: ms.nudgeWeeks,
+            }
+          : {}),
         ...(bk
           ? {
               booking_enabled: bk.enabled,

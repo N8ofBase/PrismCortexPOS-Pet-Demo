@@ -37,6 +37,12 @@ export interface BusinessesTable {
   deposit_rule: Generated<DepositRule>;
   deposit_hold_minutes: Generated<number>;
   deposit_no_show: Generated<"keep" | "refund">;
+  confirm_on: Generated<boolean>;
+  remind_on: Generated<boolean>;
+  /** Minutes after midnight, the day before. */
+  remind_minute: Generated<number>;
+  nudge_on: Generated<boolean>;
+  nudge_weeks: Generated<number>;
   is_demo: Generated<boolean>;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
@@ -162,6 +168,11 @@ export interface CustomersTable {
   zip: string | null;
   birthday: DateString | null;
   sms_opt_in: Generated<boolean>;
+  contact_pref: "text" | "email" | null;
+  nudges_off: Generated<boolean>;
+  sms_opt_in_at: Date | null;
+  sms_opt_in_source: "counter" | "online" | "import" | null;
+  email_off: Generated<boolean>;
   notes: string | null;
   astro_customer_id: string | null;
   import_batch_id: string | null;
@@ -437,6 +448,7 @@ export interface ServicesTable {
   minutes_xl: number;
   buffer_minutes: Generated<number>;
   deposit_cents: Generated<number>;
+  rebook_weeks: number | null;
   online: Generated<boolean>;
   active: Generated<boolean>;
   archived_at: Date | null;
@@ -589,13 +601,17 @@ export interface DepositsTable {
   updated_at: UpdatedAt;
 }
 
+export type MessageKind = "ready" | "moved" | "canceled" | "deposit" | "confirm" | "reminder" | "nudge";
+
 export interface AppointmentMessagesTable {
   id: Generated<string>;
   business_id: string;
   appointment_id: string;
-  kind: "ready" | "moved" | "canceled" | "deposit";
-  channel: Generated<"sms">;
+  kind: MessageKind;
+  channel: Generated<"sms" | "email">;
   to_address: string;
+  subject: string | null;
+  unsubscribe_token_hash: string | null;
   body: string;
   status: Generated<"preview" | "queued" | "sent" | "failed">;
   created_by: string | null;

@@ -9,7 +9,7 @@ import {
   SIZES,
   type PetSize,
 } from "@pet-pos/core";
-import type { AppointmentRow, BookingInput } from "@pet-pos/api";
+import type { AppointmentRow, BookingInput, NotifyResult } from "@pet-pos/api";
 import { useSession } from "../../session.tsx";
 import { errorMessage } from "../../ui/errors.ts";
 import { SlideOver } from "../../ui/SlideOver.tsx";
@@ -54,6 +54,7 @@ export function BookingPanel({
   const [start, setStart] = useState<number>(editing?.start ?? from.start ?? 10 * 60);
   const [notes, setNotes] = useState(editing?.notes ?? "");
   const [override, setOverride] = useState(false);
+  const [confirm, setConfirm] = useState(true);
 
   const services = useQuery({ queryKey: ["services"], queryFn: () => api.call("listServices", {}) });
   const groomers = useQuery({ queryKey: ["groomers"], queryFn: () => api.call("listGroomers", {}) });
@@ -96,9 +97,20 @@ export function BookingPanel({
     mutationFn: () =>
       editing
         ? api.call("updateAppointment", { ...input!, id: editing.id })
-        : api.call("bookAppointment", input!),
+        : api.call("bookAppointment", { ...input!, confirm }),
     onSuccess: (a) => {
-      toast(editing ? "Appointment saved" : `Booked ${a.petName} with ${a.groomerName}`);
+      const c = "confirmation" in a ? (a.confirmation as NotifyResult | null) : null;
+      toast(
+        editing
+          ? "Appointment saved"
+          : `Booked ${a.petName} with ${a.groomerName}${
+              c && "sent" in c
+                ? ` · confirmation sent by ${c.sent.channel === "sms" ? "text" : "email"} (a preview in the demo)`
+                : c && "skipped" in c
+                  ? ` · no confirmation: ${c.skipped}`
+                  : ""
+            }`,
+      );
       void qc.invalidateQueries({ queryKey: ["groomingDay"] });
       void qc.invalidateQueries({ queryKey: ["customerAppointments"] });
       void qc.invalidateQueries({ queryKey: ["customer"] });
@@ -280,6 +292,12 @@ export function BookingPanel({
           </div>
         )}
 
+        {!editing && (
+          <label className="check">
+            <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
+            Send a confirmation
+          </label>
+        )}
         <div className="actions">
           <button className="primary big" disabled={!ready || save.isPending}>
             {editing ? "Save changes" : "Book it"}

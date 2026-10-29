@@ -21,6 +21,7 @@ import { SlideOver } from "../ui/SlideOver.tsx";
 import { StoreMark } from "../ui/StoreMark.tsx";
 import { useToast } from "../ui/Toast.tsx";
 import { DiscountsSection } from "./settings/DiscountsSection.tsx";
+import { MessagesSection } from "./settings/MessagesSection.tsx";
 import { OnlineBookingSection } from "./settings/OnlineBookingSection.tsx";
 import { ImportPage } from "./settings/ImportPage.tsx";
 import { resizeLogo } from "./settings/logo.ts";
@@ -59,6 +60,9 @@ function Settings() {
           s={settings.data}
           canEdit={canEdit}
         />
+      )}
+      {settings.data && (
+        <MessagesSection key={JSON.stringify(settings.data.messages)} s={settings.data} canEdit={canEdit} />
       )}
 
       {can(me.staff.role, "discounts.manage") && <DiscountsSection />}

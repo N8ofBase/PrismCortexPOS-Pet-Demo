@@ -4,6 +4,7 @@ export type { Me, StaffInput, StaffListItem } from "./handlers/staff.ts";
 export {
   MAX_LOGO_CHARS,
   type BookingSettings,
+  type MessageSettings,
   type SettingsInput,
   type StoreSettings,
 } from "./handlers/settings.ts";
@@ -106,3 +107,7 @@ export type {
   VerifyResult,
 } from "./public/booking.ts";
 export type { DepositRequest } from "./handlers/deposits.ts";
+export type { MessageRow } from "./handlers/messages.ts";
+export type { NotifyResult, SweepResult } from "./messages.ts";
+export type { CustomerMessagePrefs } from "./handlers/customers.ts";
+export { SMS_CONSENT, type MyMessageSettings, type Unsubscribed } from "./public/messages.ts";

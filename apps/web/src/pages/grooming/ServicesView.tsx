@@ -112,6 +112,7 @@ function ServiceForm({ service, onClose }: { service: ServiceRow | null; onClose
     minutes: sizes((z) => (service ? String(service.minutes[z]) : "")),
     buffer: String(service?.bufferMinutes ?? 15),
     deposit: service ? centsToInput(service.depositCents) : "0.00",
+    rebook: service?.rebookWeeks ? String(service.rebookWeeks) : "",
     online: service?.online ?? true,
     active: service?.active ?? true,
   });
@@ -146,6 +147,9 @@ function ServiceForm({ service, onClose }: { service: ServiceRow | null; onClose
     if (SIZES.some((z) => !Number.isInteger(minutes[z]))) return setError("Enter minutes as whole numbers.");
     const deposit = parseMoney(f.deposit || "0");
     if (deposit === null) return setError("Enter the deposit in dollars, like 20.00.");
+    const rebook = f.rebook.trim() ? Number(f.rebook) : null;
+    if (rebook !== null && (!Number.isInteger(rebook) || rebook < 1 || rebook > 52))
+      return setError("Rebook after 1 to 52 weeks, or leave it empty for the store's default.");
     setError(null);
     save.mutate({
       id: service?.id,
@@ -156,6 +160,7 @@ function ServiceForm({ service, onClose }: { service: ServiceRow | null; onClose
       minutes,
       bufferMinutes: Number(f.buffer || "0"),
       depositCents: deposit,
+      rebookWeeks: rebook,
       online: f.online,
       active: f.active,
     });
@@ -194,6 +199,17 @@ function ServiceForm({ service, onClose }: { service: ServiceRow | null; onClose
               onChange={(e) => setF({ ...f, deposit: e.target.value })}
             />
           </label>
+          {f.kind === "main" && (
+            <label>
+              Rebook reminder after (weeks)
+              <input
+                value={f.rebook}
+                inputMode="numeric"
+                placeholder="Store default"
+                onChange={(e) => setF({ ...f, rebook: e.target.value })}
+              />
+            </label>
+          )}
         </div>
         <label>
           Description for customers

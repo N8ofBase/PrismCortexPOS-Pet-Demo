@@ -6,6 +6,8 @@ import {
   AppError,
   atLocal,
   canStep,
+  channelFor,
+  unreachableNote,
   clockText,
   isIsoDate,
   minutesOfDay,
@@ -17,7 +19,6 @@ import {
   weekDays,
   weekStart,
   withinHours,
-  appointmentText,
   suggestCallout,
   type CalloutGroomer,
   type ApptStatus,
@@ -26,11 +27,12 @@ import {
   type Quote,
   type ServiceRates,
 } from "@pet-pos/core";
-import type { DB } from "@pet-pos/db";
+import type { DB, MessageKind } from "@pet-pos/db";
 import { defineHandler } from "../handler.ts";
 import { audit, currentLocationId, requireInt } from "../shared.ts";
 import { returnSupplies, useSupplies } from "./supplies.ts";
 import { keepDeposit, refundDeposit, refundDepositsFor, releaseHolds } from "../deposits.ts";
+import { confirmBooking, notify, type NotifyResult } from "../messages.ts";
 
 type Trx = Transaction<DB>;
 type Sized = Record<PetSize, number>;
@@ -46,6 +48,7 @@ export interface ServiceRow {
   minutes: Sized;
   bufferMinutes: number;
   depositCents: number;
+  rebookWeeks: number | null;
   online: boolean;
   active: boolean;
   archived: boolean;
@@ -66,6 +69,7 @@ type ServiceDb = {
   minutes_xl: number;
   buffer_minutes: number;
   deposit_cents: number;
+  rebook_weeks: number | null;
   online: boolean;
   active: boolean;
   archived_at: Date | null;
@@ -81,6 +85,7 @@ export function toService(s: ServiceDb): ServiceRow {
     minutes: { S: s.minutes_s, M: s.minutes_m, L: s.minutes_l, XL: s.minutes_xl },
     bufferMinutes: s.buffer_minutes,
     depositCents: s.deposit_cents,
+    rebookWeeks: s.rebook_weeks,
     online: s.online,
     active: s.active,
     archived: !!s.archived_at,
@@ -113,6 +118,8 @@ export interface ServiceInput {
   minutes: Sized;
   bufferMinutes: number;
   depositCents: number;
+  /** Weeks until the rebook reminder; null uses the store's default. */
+  rebookWeeks?: number | null;
   online: boolean;
   active: boolean;
 }
@@ -135,6 +142,7 @@ export const saveService = defineHandler<ServiceInput, { id: string }>({
     }
     requireInt(input.bufferMinutes, "Buffer", { min: 0, max: 240 });
     requireInt(input.depositCents, "Deposit", { min: 0, max: 1_000_000 });
+    if (input.rebookWeeks != null) requireInt(input.rebookWeeks, "Rebook weeks", { min: 1, max: 52 });
     const values = {
       name,
       kind: input.kind,
@@ -149,6 +157,7 @@ export const saveService = defineHandler<ServiceInput, { id: string }>({
       minutes_xl: input.minutes.XL,
       buffer_minutes: input.bufferMinutes,
       deposit_cents: input.depositCents,
+      ...(input.rebookWeeks !== undefined ? { rebook_weeks: input.rebookWeeks } : {}),
       online: input.online,
       active: input.active,
     };
@@ -378,6 +387,8 @@ export interface AppointmentRow {
   receiptNumber: number | null;
   /** Money refunded on that sale (for "Refunded" on a paid groom). */
   saleRefundedCents: number;
+  /** How messages reach the customer, or why they can't. */
+  reach: { channel: "sms" | "email"; to: string } | { none: string };
   /** A held online booking: when its time to pay runs out. */
   holdUntil: Date | null;
   deposit: AppointmentDeposit | null;
@@ -397,6 +408,25 @@ export interface AppointmentDeposit {
   url: string | null;
   /** The no-show or cancellation fee sale, when it was kept. */
   keptReceiptNumber: number | null;
+}
+
+function reachOf(r: {
+  customer_name: string | null;
+  customer_phone: string | null;
+  customer_email: string | null;
+  sms_opt_in: boolean | null;
+  contact_pref: "text" | "email" | null;
+  email_off: boolean | null;
+}): AppointmentRow["reach"] {
+  if (r.customer_name === null) return { none: "the customer was deleted" };
+  const c = {
+    phone: r.customer_phone,
+    email: r.customer_email,
+    smsOptIn: !!r.sms_opt_in,
+    pref: r.contact_pref,
+    emailOff: !!r.email_off,
+  };
+  return channelFor(c) ?? { none: unreachableNote(c) };
 }
 
 export async function appointmentRows(
@@ -427,6 +457,10 @@ export async function appointmentRows(
       "a.customer_id",
       "c.name as customer_name",
       "c.phone as customer_phone",
+      "c.email as customer_email",
+      "c.sms_opt_in",
+      "c.contact_pref",
+      "c.email_off",
       "a.pet_id",
       "a.pet_name",
       "p.species",
@@ -515,6 +549,7 @@ export async function appointmentRows(
       saleRefundedCents: r.sale_refunded_cents,
       noteCount: r.note_count,
       lastNote: r.last_note,
+      reach: reachOf(r),
       holdUntil: r.status === "held" ? r.hold_expires_at : null,
       deposit: r.deposit_id
         ? {
@@ -623,6 +658,8 @@ export async function loadDay(trx: Trx, day: string): Promise<GroomingDay> {
 // ---- booking ----
 
 export interface BookingInput {
+  /** Send the customer a booking confirmation (default yes). */
+  confirm?: boolean;
   customerId: string;
   petId: string;
   serviceId: string;
@@ -865,7 +902,10 @@ async function writeAddons(trx: Trx, ctx: Ctx, appointmentId: string, p: Plan) {
       .execute();
 }
 
-export const bookAppointment = defineHandler<BookingInput, AppointmentRow>({
+export const bookAppointment = defineHandler<
+  BookingInput,
+  AppointmentRow & { confirmation: NotifyResult | null }
+>({
   action: "grooming.book",
   async run(trx, ctx, input) {
     const p = await planBooking(trx, input, null);
@@ -897,7 +937,8 @@ export const bookAppointment = defineHandler<BookingInput, AppointmentRow>({
         .executeTakeFirstOrThrow(),
     );
     await writeAddons(trx, ctx, row.id, p);
-    return (await appointmentRows(trx, { ids: [row.id] }))[0]!;
+    const confirmation = input.confirm === false ? null : await confirmBooking(trx, ctx, row.id);
+    return { ...(await appointmentRows(trx, { ids: [row.id] }))[0]!, confirmation };
   },
 });
 
@@ -1102,76 +1143,44 @@ export async function countUpcomingFor(trx: Trx, customerId: string): Promise<nu
 
 // ---- busy-day tools (3c) ----
 
-async function storeName(trx: Trx, ctx: Ctx): Promise<string> {
-  const b = await trx
-    .selectFrom("businesses")
-    .select("name")
-    .where("id", "=", ctx.businessId)
-    .executeTakeFirstOrThrow();
-  return b.name;
-}
-
-async function saveText(
-  trx: Trx,
-  ctx: Ctx,
-  appointmentId: string,
-  kind: "ready" | "moved" | "canceled" | "deposit",
-  to: string,
-  body: string,
-) {
-  await trx
-    .insertInto("appointment_messages")
-    .values({
-      business_id: ctx.businessId,
-      appointment_id: appointmentId,
-      kind,
-      to_address: to,
-      body,
-      created_by: ctx.staffId,
-    })
-    .execute();
-}
-
-/** The ready-for-pickup text: once per appointment, when the store has it on and the customer has a phone. */
+/** The ready-for-pickup message: once per appointment, when the store has it on. */
 async function readyText(trx: Trx, ctx: Ctx, id: string) {
   const b = await trx
     .selectFrom("businesses")
-    .select(["name", "text_when_ready"])
+    .select(["text_when_ready"])
     .where("id", "=", ctx.businessId)
     .executeTakeFirstOrThrow();
-  if (!b.text_when_ready) return;
-  const a = await trx
-    .selectFrom("appointments as a")
-    .leftJoin("customers as c", "c.id", "a.customer_id")
-    .select(["a.pet_name", "c.phone"])
-    .where("a.id", "=", id)
-    .executeTakeFirst();
-  if (!a?.phone) return;
-  const sent = await trx
-    .selectFrom("appointment_messages")
-    .select("id")
-    .where("appointment_id", "=", id)
-    .where("kind", "=", "ready")
-    .executeTakeFirst();
-  if (sent) return;
-  await saveText(trx, ctx, id, "ready", a.phone, appointmentText.ready(b.name, a.pet_name));
+  if (b.text_when_ready) await notify(trx, ctx, id, "ready");
 }
 
 export interface AppointmentMessage {
   id: string;
-  kind: "ready" | "moved" | "canceled" | "deposit";
+  kind: MessageKind;
+  channel: "sms" | "email";
   to: string;
+  subject: string | null;
   body: string;
   status: "preview" | "queued" | "sent" | "failed";
   createdAt: Date;
 }
+
+export const MESSAGE_COLUMNS = [
+  "id",
+  "kind",
+  "channel",
+  "to_address as to",
+  "subject",
+  "body",
+  "status",
+  "created_at as createdAt",
+] as const;
 
 export const appointmentMessages = defineHandler<{ appointmentId: string }, AppointmentMessage[]>({
   action: "grooming.view",
   async run(trx, _ctx, { appointmentId }) {
     return trx
       .selectFrom("appointment_messages")
-      .select(["id", "kind", "to_address as to", "body", "status", "created_at as createdAt"])
+      .select(MESSAGE_COLUMNS)
       .where("appointment_id", "=", appointmentId)
       .orderBy("created_at")
       .execute();
@@ -1183,29 +1192,15 @@ export function localDay(d: Date): string {
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 }
 
-/** Texts the customer that their groom moved or was canceled (a preview in the demo). */
+/** Tells the customer their groom moved or was canceled, by text or email (a preview in the demo). */
 export const textAppointment = defineHandler<{ id: string; kind: "moved" | "canceled" }, AppointmentMessage>({
   action: "grooming.book",
   async run(trx, ctx, { id, kind }) {
-    const a = await trx
-      .selectFrom("appointments as a")
-      .innerJoin("staff as st", "st.id", "a.staff_id")
-      .leftJoin("customers as c", "c.id", "a.customer_id")
-      .select(["a.pet_name", "a.starts_at", "st.name as groomer", "c.phone"])
-      .where("a.id", "=", id)
-      .executeTakeFirst();
-    if (!a) throw new AppError("not_found", "That appointment doesn't exist.");
-    if (!a.phone) throw new AppError("invalid", "This customer has no phone number on file.");
-    const store = await storeName(trx, ctx);
-    const day = localDay(a.starts_at);
-    const body =
-      kind === "moved"
-        ? appointmentText.moved(store, a.pet_name, day, minutesOfDay(a.starts_at), a.groomer)
-        : appointmentText.canceled(store, a.pet_name, day, minutesOfDay(a.starts_at));
-    await saveText(trx, ctx, id, kind, a.phone, body);
+    const r = await notify(trx, ctx, id, kind);
+    if ("skipped" in r) throw new AppError("invalid", `Nothing was sent: ${r.skipped}.`);
     const rows = await trx
       .selectFrom("appointment_messages")
-      .select(["id", "kind", "to_address as to", "body", "status", "created_at as createdAt"])
+      .select(MESSAGE_COLUMNS)
       .where("appointment_id", "=", id)
       .orderBy("created_at", "desc")
       .limit(1)
@@ -1369,11 +1364,10 @@ export const applyCallout = defineHandler<
   CalloutResult
 >({
   action: "grooming.book",
-  async run(trx, ctx, { staffId, day, changes, notify, addTimeOff: off }) {
+  async run(trx, ctx, { staffId, day, changes, notify: tell, addTimeOff: off }) {
     if (!isIsoDate(day)) throw new AppError("invalid", "Pick a day.");
     const out: CalloutResult = { moved: 0, canceled: 0, left: 0, texts: 0 };
     const log: Record<string, unknown>[] = [];
-    const store = await storeName(trx, ctx);
     for (const c of changes) {
       const a = await trx
         .selectFrom("appointments as a")
@@ -1409,17 +1403,7 @@ export const applyCallout = defineHandler<
         await refundDepositsFor(trx, ctx, [a.id], "groomer called out");
         out.canceled++;
         log.push({ id: a.id, pet: a.pet_name, action: "cancel" });
-        if (notify && a.phone) {
-          await saveText(
-            trx,
-            ctx,
-            a.id,
-            "canceled",
-            a.phone,
-            appointmentText.canceled(store, a.pet_name, localDay(a.starts_at), minutesOfDay(a.starts_at)),
-          );
-          out.texts++;
-        }
+        if (tell && "sent" in (await notify(trx, ctx, a.id, "canceled"))) out.texts++;
         continue;
       }
       const groomer = await trx
@@ -1463,17 +1447,7 @@ export const applyCallout = defineHandler<
         day: toDay,
         start: toStart,
       });
-      if (notify && a.phone) {
-        await saveText(
-          trx,
-          ctx,
-          a.id,
-          "moved",
-          a.phone,
-          appointmentText.moved(store, a.pet_name, toDay, toStart, groomer.name),
-        );
-        out.texts++;
-      }
+      if (tell && "sent" in (await notify(trx, ctx, a.id, "moved"))) out.texts++;
     }
     if (off) {
       const [y, m, d] = day.split("-").map(Number) as [number, number, number];

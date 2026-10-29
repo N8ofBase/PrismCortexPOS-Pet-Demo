@@ -195,6 +195,7 @@ describe("the appointment panel", () => {
     noteCount: 0,
     lastNote: null,
     holdUntil: null,
+    reach: { channel: "sms", to: "2125550100" },
     deposit: {
       id: "d1",
       amountCents: 2000,

@@ -4,6 +4,7 @@
 import { sql, type Transaction } from "kysely";
 import { AppError, applyDeposit, clockText, minutesOfDay, shortDay } from "@pet-pos/core";
 import type { DB, DepositStatus } from "@pet-pos/db";
+import { confirmBooking } from "./messages.ts";
 import { checkout } from "./payments/checkout.ts";
 import { currentLocationId, nextReceiptNumber } from "./shared.ts";
 
@@ -135,12 +136,15 @@ export async function markDepositPaid(trx: Trx, depositId: string, providerRef: 
       .set({ status: "paid", provider_ref: providerRef, paid_at: now })
       .where("id", "=", d.id)
       .execute();
-    if (a.status === "held")
+    if (a.status === "held") {
       await trx
         .updateTable("appointments")
         .set({ status: "booked", hold_expires_at: null })
         .where("id", "=", a.id)
         .execute();
+      // A held online booking is confirmed once its deposit is in.
+      await confirmBooking(trx, { businessId: d.business_id, staffId: null }, a.id);
+    }
     return "paid";
   }
   const { refundRef } = await checkout.refund(providerRef, d.amount_cents);

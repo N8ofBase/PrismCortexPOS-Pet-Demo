@@ -78,6 +78,7 @@ import {
 } from "./handlers/register.ts";
 import { sendReceipt } from "./handlers/receipts.ts";
 import { refundDeposit, requestDeposit } from "./handlers/deposits.ts";
+import { listMessages, sendDueNow } from "./handlers/messages.ts";
 import { refundPreview, refundSale } from "./handlers/refunds.ts";
 import { getSettings, updateSettings } from "./handlers/settings.ts";
 import { addStaff, listStaff, me, updateStaff } from "./handlers/staff.ts";
@@ -162,6 +163,8 @@ export const handlers = {
   textAppointment,
   requestDeposit,
   refundDeposit,
+  listMessages,
+  sendDueNow,
   appointmentMessages,
   calloutPreview,
   applyCallout,

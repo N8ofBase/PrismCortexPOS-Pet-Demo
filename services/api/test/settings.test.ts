@@ -213,7 +213,7 @@ describe("remove demo data", () => {
       punches: 2,
       discounts: 4,
       services: 3,
-      appointments: 4,
+      appointments: 6,
     });
     await invoke(db, owner, "removeDemoData", undefined);
     expect(await invoke(db, owner, "demoDataPreview", undefined)).toEqual({
@@ -254,7 +254,7 @@ describe("remove demo data", () => {
           punches: 2,
           discounts: 4,
           services: 3,
-          appointments: 4,
+          appointments: 6,
         },
       },
     ]);
