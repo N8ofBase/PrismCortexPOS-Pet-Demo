@@ -249,6 +249,17 @@ label.check input {
   width: auto;
   min-height: 0;
 }
+/* A label with a title and a line under it (consent wording, service descriptions) wraps inside its box. */
+label.check > span {
+  white-space: normal;
+  min-width: 0;
+}
+label.check:has(> span .sub) {
+  align-items: flex-start;
+}
+label.check:has(> span .sub) input {
+  margin-top: 3px;
+}
 .form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
