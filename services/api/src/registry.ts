@@ -80,6 +80,7 @@ import { sendReceipt } from "./handlers/receipts.ts";
 import { refundDeposit, requestDeposit } from "./handlers/deposits.ts";
 import { listMessages, sendDueNow } from "./handlers/messages.ts";
 import { refundPreview, refundSale } from "./handlers/refunds.ts";
+import { astroReport, groomingReport, salesReport, saveAstroCheck, stockReport } from "./handlers/reports.ts";
 import { getSettings, updateSettings } from "./handlers/settings.ts";
 import { addStaff, listStaff, me, updateStaff } from "./handlers/staff.ts";
 
@@ -168,6 +169,11 @@ export const handlers = {
   appointmentMessages,
   calloutPreview,
   applyCallout,
+  salesReport,
+  groomingReport,
+  stockReport,
+  astroReport,
+  saveAstroCheck,
 };
 
 export type Handlers = typeof handlers;

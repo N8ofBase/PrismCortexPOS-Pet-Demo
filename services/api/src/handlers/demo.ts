@@ -90,7 +90,9 @@ export const removeDemoData = defineHandler<void, DemoCounts>({
         before: { name: c.name, pets: c.pets, via: "remove demo data" },
       });
 
-    // Sample appointments, services and groomer hours (the app role can't delete those directly).
+    // The sample sales history and Astro checks (the app role can't delete sales), then
+    // sample appointments, services and groomer hours (nor those).
+    await sql`SELECT remove_demo_sales()`.execute(trx);
     await sql`SELECT remove_demo_grooming()`.execute(trx);
     // Children first where a sample row could sit under a user's record.
     await trx.deleteFrom("astro_punches").where("is_demo", "=", true).execute();

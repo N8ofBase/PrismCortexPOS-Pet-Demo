@@ -2,7 +2,7 @@
 // time while the customer pays, marking it paid, refunding, keeping it as a fee, and
 // applying it to the sale at pickup. Payment links go through `checkout`.
 import { sql, type Transaction } from "kysely";
-import { AppError, applyDeposit, clockText, minutesOfDay, shortDay } from "@pet-pos/core";
+import { AppError, applyDeposit, clockText, FEES_CATEGORY, minutesOfDay, shortDay } from "@pet-pos/core";
 import type { DB, DepositStatus } from "@pet-pos/db";
 import { confirmBooking } from "./messages.ts";
 import { checkout } from "./payments/checkout.ts";
@@ -296,6 +296,7 @@ export async function keepDeposit(
       qty: 1,
       unit_price_cents: cents,
       line_total_cents: cents,
+      category: FEES_CATEGORY,
     })
     .execute();
   await trx

@@ -18,6 +18,7 @@ A Claude Project on claude.ai keeps this system's spec, plans and status in one 
 | `docs/plans/phase-2-register.md` | Register plan |
 | `docs/plans/phase-3-grooming.md` | Grooming plan |
 | `docs/plans/phase-4-online-booking.md` | Online booking, deposits and messages plan |
+| `docs/plans/phase-5-reports.md` | Reports plan (5a built), with purchase orders and live Astro outlined |
 
 Optional:
 - **The smaller 1a to 1e and 2b, 2c plans:** add these if you'll ask about those details.

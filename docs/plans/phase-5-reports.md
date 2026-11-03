@@ -1,6 +1,13 @@
 # Phase 5 plan: reports, purchase orders and live Astro
 
-Status: **5a planned 2026-11-03, waiting for approval.** 5b and 5c not started.
+Status: **5a built 2026-11-03.** 5b and 5c not started.
+
+Built differently from the plan in 5a:
+- **Average sale** is sales ÷ count (the average ticket), not net ÷ count. Refunds in a range can belong to older sales, so net ÷ count could mislead.
+- **Day rows and range totals** come from `moneyTotalsByPeriod()` in `totals.ts`: the same queries as `moneyTotals()`, grouped by day with `width_bucket`. `moneyTotals()` is now that function with one period. Calling `moneyTotals()` once per day was too slow in the browser.
+- **Sample history:** about 550 counter sales over six weeks, six paid grooms, and two no-shows (one with a kept deposit), not three. It's on only for the demo app (`ensureDemo(db, { salesHistory: true })`); tests leave it off so their sample store stays small. It's written in a few large inserts, since every query in the browser is a round trip to the database worker.
+- **Weekly Astro check:** a box left empty counts as matching, and the tile turns amber when no check was saved in two weeks (`checkDue`, worked out on the server).
+- **Also fixed:** the main column no longer widens past a phone screen when a row of buttons is wide (`.main` has one `minmax(0, 1fr)` column).
 
 Spec scope (Phase checklist): purchase orders, reports, live Astro API. Spec sections:
 - **Reports:** "Daily sales by payment type and category, grooming revenue by groomer"; "Low stock and reorder list, inventory value at cost"; "Astro: punches earned, rewards and offers redeemed, queue backlog"; "No-shows and rebooking rate".

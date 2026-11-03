@@ -10,6 +10,10 @@ export const CATEGORIES = [
   "Bird",
 ] as const;
 
+/** Report categories for lines that aren't products: grooms, and kept deposits. */
+export const GROOMING_CATEGORY = "Grooming";
+export const FEES_CATEGORY = "Fees";
+
 /**
  * The ways one barcode can be stored. Scanners and cameras read a 12-digit UPC-A as
  * EAN-13 with a leading 0 (012345678905 ↔ 0012345678905), so both forms match.

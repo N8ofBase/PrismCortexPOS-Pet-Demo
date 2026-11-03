@@ -187,6 +187,8 @@ button:disabled {
 .main {
   padding: 16px max(16px, env(safe-area-inset-right)) 40px 20px;
   display: grid;
+  /* One column that never grows past the screen: wide rows scroll inside themselves. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   align-content: start;
   min-width: 0;
@@ -1301,4 +1303,87 @@ label.button {
 .book .demo-banner a {
   color: inherit;
   font-weight: 700;
+}
+
+/* reports */
+.report-tabs a {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  min-height: 36px;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.report-tabs a[aria-current="page"] {
+  background: var(--sunk);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.report-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.report-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.report-head h2 {
+  margin: 0;
+}
+.report-note {
+  margin: 0;
+}
+th button.sort {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+th button.sort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+tr.total td {
+  border-top: 2px solid var(--line);
+  font-weight: 700;
+}
+.kpi .sub {
+  margin-top: 2px;
+}
+.kpi.warn {
+  background: var(--warn-soft);
+}
+.kpi.warn b {
+  color: var(--warn);
+}
+.check-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.check-card {
+  display: grid;
+  gap: 8px;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.check-row input {
+  width: 7.5rem;
+}
+/* The preset buttons scroll inside their row on a phone instead of widening the page. */
+.toolbar > .cat-tabs {
+  min-width: 0;
+  max-width: 100%;
 }

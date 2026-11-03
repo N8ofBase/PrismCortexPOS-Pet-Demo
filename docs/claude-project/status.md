@@ -1,6 +1,6 @@
 # Pet store POS: status
 
-Updated 2026-11-03. Code: `github.com/N8ofBase/PrismCortexPOS-Pet-Demo` (branch `main`). Demo: https://petpos-demo.prismcortex.net, with the customer booking page at `/book`.
+Updated 2026-11-03 (5a). Code: `github.com/N8ofBase/PrismCortexPOS-Pet-Demo` (branch `main`). Demo: https://petpos-demo.prismcortex.net, with the customer booking page at `/book`.
 
 ## How it runs today
 
@@ -26,10 +26,11 @@ Updated 2026-11-03. Code: `github.com/N8ofBase/PrismCortexPOS-Pet-Demo` (branch 
 | 4a | Online booking page: sign in with a one-time code; pick pet, service, groomer and time; cancel or reschedule up to the cutoff |
 | 4b | Deposits on online bookings: time held while paying, applied at the register, refunded on an in-time cancel, kept as a fee on a no-show (store's choice) |
 | 4c | Confirmations, the day-before reminder and rebook reminders, by text or email as the customer chooses; opt-outs, quiet hours (9 AM to 8 PM), Grooming → Messages |
+| 5a | Reports for owners and managers: sales by payment type, category and day, top products; grooming by groomer and service, no-shows and rebooking rate; stock value and the reorder list; Astro punches, rewards, offers, queue backlog and a weekly check against Astro. Any date range, CSV download, six weeks of sample history in the demo |
 
 Not built:
 - **2d:** real Square, deliberately deferred.
-- **Phase 5:** purchase orders, reports and the live Astro API.
+- **Phase 5b and 5c:** purchase orders, and the live Astro API.
 
 ## Decisions worth knowing
 
@@ -44,6 +45,10 @@ Not built:
   - **Texts:** only to customers who agreed. Where and when they agreed is recorded for the 10DLC registration.
   - **Ready text:** since 4c, the ready-for-pickup text needs that agreement too.
   - **Rebook reminders:** these go out after the service's weeks (Full groom 6, Bath 4) when nothing is booked, at most one per pet every 14 days. Emails carry an unsubscribe link.
+- **Reports:**
+  - **Who:** owners and managers. Reports show costs, so cashiers and groomers don't see them.
+  - **Category:** a sale counts under the category its product had when it sold. Sales from before 5a took the product's category at the time of the update.
+  - **Rebooked:** the pet's next groom is booked within the service's rebook weeks plus two. "Before they left" counts ones booked by the day of the groom.
 - **Several stores later:** one database, every row tagged with its store, and the database itself keeps stores apart. Clients will live at `<client>.pos.prismcortex.net`.
 
 ## Open items and next steps
@@ -53,7 +58,7 @@ Not built:
   - start 10DLC text registration (a few weeks for carrier approval)
   - order a Square Terminal
 - **Hosted mode:** AWS stacks, Cognito sign-in, RDS, real Square (2d), SES email and SMS with STOP handling, and a scheduled message sweep.
-- **Phase 5:** purchase orders, reports, live Astro API.
+- **Phase 5:** purchase orders (5b), live Astro API (5c, needs Astro's approval and hosted mode).
 - **Possible:** an accounting export (QuickBooks or CSV). It came up and isn't planned yet.
 - **Before going live** (spec checklist):
   - 50 test sales in the Square Sandbox

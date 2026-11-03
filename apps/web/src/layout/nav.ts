@@ -13,6 +13,7 @@ export const NAV: NavItem[] = [
   { path: "/inventory", label: "Inventory", action: "products.view" },
   { path: "/customers", label: "Customers", action: "customers.view" },
   { path: "/sales", label: "Sales", action: "sales.view" },
+  { path: "/reports", label: "Reports", action: "reports.view" },
   { path: "/astro", label: "Astro", action: "astro.view" },
   { path: "/settings", label: "Settings", action: "settings.view" },
 ];

@@ -34,7 +34,7 @@ async function start(): Promise<DemoRuntime> {
   await client.open(DEMO_DATA_DIR);
   await migrate(client);
   const db = createDb(client);
-  await ensureDemo(db);
+  await ensureDemo(db, { salesHistory: true });
 
   return {
     db,

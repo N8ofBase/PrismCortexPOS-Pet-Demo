@@ -313,6 +313,8 @@ export interface SaleLinesTable {
   earns_punches: Generated<number>;
   /** The line's share of the sale's tax; null for sales rung before migration 012. */
   tax_cents: number | null;
+  /** The product's category when sold ("Grooming" for grooms, "Fees" for kept deposits). */
+  category: string | null;
   created_at: CreatedAt;
 }
 
@@ -682,6 +684,20 @@ export interface ImportChangesTable {
   created_at: CreatedAt;
 }
 
+export interface AstroChecksTable {
+  id: Generated<string>;
+  business_id: string;
+  customer_id: string;
+  program_id: string;
+  local_balance: number;
+  /** What the Astro portal shows; null when staff tapped "Matches". */
+  astro_balance: number | null;
+  matches: boolean;
+  staff_id: string | null;
+  is_demo: Generated<boolean>;
+  created_at: CreatedAt;
+}
+
 export interface DemoSeedPartsTable {
   business_id: string;
   part: string;
@@ -704,6 +720,7 @@ export interface DB {
   pets: PetsTable;
   vaccinations: VaccinationsTable;
   astro_punches: AstroPunchesTable;
+  astro_checks: AstroChecksTable;
   astro_balances: AstroBalancesView;
   demo_seed_parts: DemoSeedPartsTable;
   import_batches: ImportBatchesTable;

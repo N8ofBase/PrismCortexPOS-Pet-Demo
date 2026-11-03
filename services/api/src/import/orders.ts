@@ -44,14 +44,14 @@ export async function orderRow(r: Row, rc: RowCtx): Promise<RowResult> {
   let product = sku
     ? await rc.trx
         .selectFrom("products")
-        .select(["id", "name", "sku", "barcode", "tax_class"])
+        .select(["id", "name", "sku", "barcode", "tax_class", "category"])
         .where(sql`lower(sku)`, "=", sku.toLowerCase())
         .executeTakeFirst()
     : undefined;
   if (!product && barcode)
     product = await rc.trx
       .selectFrom("products")
-      .select(["id", "name", "sku", "barcode", "tax_class"])
+      .select(["id", "name", "sku", "barcode", "tax_class", "category"])
       .where("barcode", "in", barcodeVariants(barcode))
       .executeTakeFirst();
   const name = text(r.item) ?? product?.name ?? sku ?? barcode;
@@ -133,6 +133,7 @@ export async function orderRow(r: Row, rc: RowCtx): Promise<RowResult> {
       discount_cents: money.discountCents,
       line_total_cents: money.lineTotalCents,
       tax_cents: 0,
+      category: product?.category ?? null,
     })
     .execute();
 
