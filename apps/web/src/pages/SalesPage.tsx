@@ -74,6 +74,9 @@ export function SalesPage() {
           })}
         </span>
         {can(me.staff.role, "drawer.count") && <Link to="close">Close the day</Link>}
+        {can(me.staff.role, "reports.view") && (
+          <Link to={`/reports/sales?from=${day}&to=${day}`}>See reports</Link>
+        )}
       </div>
       <div className="toolbar">
         <div className="cat-tabs" style={{ marginTop: 0 }}>

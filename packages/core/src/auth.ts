@@ -31,6 +31,8 @@ const PERMISSIONS = {
   "sales.refund": ["owner", "manager"],
   /** End-of-day drawer count. */
   "drawer.count": ["owner", "manager"],
+  /** Reports show costs and margins, so cashiers and groomers don't see them. */
+  "reports.view": ["owner", "manager"],
   "astro.view": ["owner", "manager", "cashier"],
   "astro.edit": ["owner", "manager"],
   "settings.view": ["owner", "manager"],

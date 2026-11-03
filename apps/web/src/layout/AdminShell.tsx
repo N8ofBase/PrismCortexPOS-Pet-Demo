@@ -8,6 +8,7 @@ import { CustomersRoutes } from "../pages/customers/CustomersPage.tsx";
 import { GroomingPage } from "../pages/grooming/GroomingPage.tsx";
 import { InventoryRoutes } from "../pages/inventory/InventoryPage.tsx";
 import { RegisterPage } from "../pages/register/RegisterPage.tsx";
+import { ReportsRoutes } from "../pages/reports/ReportsPage.tsx";
 import { SalesRoutes } from "../pages/SalesPage.tsx";
 import { SettingsRoutes } from "../pages/Settings.tsx";
 import { DemoBanner } from "./DemoBanner.tsx";
@@ -25,6 +26,7 @@ const PAGES: Record<string, () => React.ReactNode> = {
   "/inventory": () => <InventoryRoutes />,
   "/customers": () => <CustomersRoutes />,
   "/sales": () => <SalesRoutes />,
+  "/reports": () => <ReportsRoutes />,
   "/astro": () => <AstroPage />,
   "/settings": () => <SettingsRoutes />,
 };

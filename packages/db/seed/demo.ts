@@ -6,6 +6,7 @@
 import type { Kysely, Transaction } from "kysely";
 import { addDays, atLocal, isIsoDate, todayIso, type Role } from "@pet-pos/core";
 import type { DB } from "../src/schema.ts";
+import { seedSalesHistory } from "./history.ts";
 
 const DEMO_STAFF: { name: string; email: string; role: Role }[] = [
   { name: "Sample Owner (DEMO)", email: "owner.demo@example.com", role: "owner" },
@@ -19,8 +20,16 @@ export async function hasDemoData(db: Kysely<DB>): Promise<boolean> {
   return row !== undefined;
 }
 
+export interface EnsureDemoOptions {
+  /**
+   * Six weeks of sample sales and grooms for the reports. The demo app turns it on;
+   * tests leave it off so their sample store stays small and quick to set up.
+   */
+  salesHistory?: boolean;
+}
+
 /** Creates any missing part of the sample store. Returns the demo business id. */
-export async function ensureDemo(db: Kysely<DB>): Promise<string> {
+export async function ensureDemo(db: Kysely<DB>, options: EnsureDemoOptions = {}): Promise<string> {
   return db.transaction().execute(async (trx) => {
     const existing = await trx
       .selectFrom("businesses")
@@ -35,6 +44,7 @@ export async function ensureDemo(db: Kysely<DB>): Promise<string> {
     await once(trx, businessId, "grooming_supplies", "service_supplies", seedGroomingSupplies);
     await once(trx, businessId, "deposits", "deposits", seedDeposits);
     await once(trx, businessId, "messages", "appointment_messages", seedMessages);
+    if (options.salesHistory) await once(trx, businessId, "sales_history", "astro_checks", seedSalesHistory);
     return businessId;
   });
 }
@@ -54,7 +64,8 @@ async function once(
     | "services"
     | "service_supplies"
     | "deposits"
-    | "appointment_messages",
+    | "appointment_messages"
+    | "astro_checks",
   seed: (trx: Transaction<DB>, businessId: string) => Promise<void>,
 ): Promise<void> {
   const done = await trx

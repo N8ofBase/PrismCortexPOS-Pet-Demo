@@ -19,3 +19,4 @@ export * from "./drawer.ts";
 export * from "./grooming.ts";
 export * from "./booking.ts";
 export * from "./messages.ts";
+export * from "./report.ts";

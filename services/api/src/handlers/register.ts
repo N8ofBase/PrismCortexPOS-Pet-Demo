@@ -7,6 +7,7 @@ import {
   allocate,
   AppError,
   can,
+  GROOMING_CATEGORY,
   priceSale,
   type AppliedStoreDiscount,
   type AstroSalePayload,
@@ -356,6 +357,7 @@ export const startCheckout = defineHandler<TicketInput, CheckoutResult>({
           astro_program_id: prod?.astroProgramId ?? null,
           earns_punches: pl.earnsPunches,
           tax_cents: taxShares[i]!,
+          category: groom ? GROOMING_CATEGORY : (prod?.category ?? null),
         })
         .returning("id")
         .executeTakeFirstOrThrow();

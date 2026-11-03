@@ -62,7 +62,28 @@ export {
   type PhotoInput,
   type ServiceSupply,
 } from "./handlers/groomingHistory.ts";
-export type { GroomerTotals, MoneyTotals } from "./handlers/totals.ts";
+export type { CategoryTotals, GroomerTotals, MoneyTotals } from "./handlers/totals.ts";
+export {
+  ASTRO_CHECK_SIZE,
+  type AstroBacklog,
+  type AstroCheckCandidate,
+  type AstroCheckRow,
+  type AstroProgramReportRow,
+  type AstroReport,
+  type CountToCheckRow,
+  type GroomerReportRow,
+  type GroomingReport,
+  type NoShowRow,
+  type PaymentTypeRow,
+  type ReorderRow,
+  type ReportRange,
+  type SalesDayRow,
+  type SalesReport,
+  type ServiceReportRow,
+  type StockCategoryRow,
+  type StockReport,
+  type TopProductRow,
+} from "./handlers/reports.ts";
 export { MAX_ASTRO_ATTEMPTS, processAstroQueue, type SendSummary } from "./astro/sender.ts";
 export { CHUNK_SIZE, MAX_ROWS, type ImportBatchRow } from "./handlers/import.ts";
 export type { ImportResult, RowOutcome } from "./import/engine.ts";

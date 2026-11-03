@@ -32,7 +32,14 @@ Status: **Phases 1, 2 (except 2d, real Square) and 3 are done** in demo mode.
   - Each goes by text or email as the customer chooses, with opt-outs and quiet hours honored.
   - They show in Grooming → Messages; previews only in the demo.
 
-The demo is live at https://petpos-demo.prismcortex.net (booking page: https://petpos-demo.prismcortex.net/book). Phase 4 is done.
+- Phase 5a: reports for owners and managers.
+  - Sales by payment type, category and day, and top products.
+  - Grooming by groomer and service, no-shows and the rebooking rate.
+  - Stock value at cost and retail, and the reorder list.
+  - Astro punches, rewards and offers, the queue backlog, and a weekly check against Astro.
+  - Any date range, a CSV download for every table, and six weeks of sample history in the demo.
+
+The demo is live at https://petpos-demo.prismcortex.net (booking page: https://petpos-demo.prismcortex.net/book). Phase 4 is done; Phase 5a (reports) is built.
 
 ## Run it
 
